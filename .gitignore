@@ -1,0 +1,34 @@
+# ========================================
+# ESP-IDF Core
+# ========================================
+build/
+managed_components/
+sdkconfig.old
+sdkconfig
+
+# ========================================
+# C++ & Clang Tooling
+# ========================================
+compile_commands.json
+.cache/
+*.o
+*.obj
+*.d
+
+# ========================================
+# Testing (Host & Browser)
+# ========================================
+tests/unit/build/
+tests/browser/node_modules/
+tests/browser/test-results/
+tests/browser/playwright-report/
+tests/browser/playwright/.cache/
+
+# ========================================
+# OS Generated Files
+# ========================================
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db

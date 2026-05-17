@@ -1,0 +1,9 @@
+{
+    "recommendations": [
+        "espressif.esp-idf-extension",
+        "ms-vscode.cpptools-extension-pack",
+        "twxs.cmake",
+        "ms-vscode.makefile-tools",
+        "xgscms.xgscms-vscode-clang-tidy"
+    ]
+}

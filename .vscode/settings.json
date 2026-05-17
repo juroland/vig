@@ -1,0 +1,15 @@
+{
+    "C_Cpp.default.cppStandard": "c++23",
+    "C_Cpp.default.cStandard": "c17",
+    "C_Cpp.intelliSenseEngine": "default",
+    // Format on save using clang-format rules
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "ms-vscode.cpptools",
+    // Link the Clang-Tidy extension to the compilation database
+    "clang-tidy.buildPath": "build",
+    "clang-tidy.lintOnSave": true,
+    // Ensure the terminal loads your ESP-IDF environment automatically if configured globally
+    "terminal.integrated.env.linux": {
+        "IDF_PATH": "${env:IDF_PATH}"
+    }
+}

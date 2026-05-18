@@ -1,0 +1,56 @@
+menu "VIG Device Configuration"
+
+    config VIG_API_URL
+        string "VIG API Base URL"
+        default "http://vig_server.local/api"
+        help
+            The base URL for the VIG backend API.
+
+    config VIG_DEVICE_TOKEN
+        string "VIG Device Token"
+        default "default_token_change_me"
+        help
+            The authentication token for this device.
+
+    config VIG_HARDWARE_ID
+        string "Hardware ID"
+        default "ESP32P4_CAM_001"
+        help
+            Unique identifier for this hardware unit.
+
+    config VIG_HEARTBEAT_INTERVAL_MS
+        int "Heartbeat Interval (ms)"
+        default 30000
+        range 1000 3600000
+        help
+            Time between heartbeat pulses in milliseconds.
+
+    config VIG_USE_MOCK_CAMERA
+        bool "Use mock camera (for CI / no-hardware builds)"
+        default n
+
+    config VIG_CAMERA_WIDTH
+        int "Camera capture width"
+        default 1280
+
+    config VIG_CAMERA_HEIGHT
+        int "Camera capture height"
+        default 720
+
+    config VIG_ENCODER_BITRATE_KBPS
+        int "H.264 encoder bitrate (kbps)"
+        default 2000
+
+    config VIG_ENCODER_GOP
+        int "H.264 encoder GOP size"
+        default 30
+
+    config VIG_STREAM_PORT
+        int "Local stream server HTTP port"
+        default 80
+
+    config VIG_STREAM_MAX_CLIENTS
+        int "Max simultaneous WebSocket clients"
+        default 4
+
+endmenu

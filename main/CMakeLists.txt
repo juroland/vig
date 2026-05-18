@@ -1,13 +1,19 @@
-idf_component_register(SRCS "main.cpp" INCLUDE_DIRS "."
-    REQUIRES esp_eth driver
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+idf_component_register(
+    SRCS "main.cpp"
+    INCLUDE_DIRS "include"
+
+    REQUIRES
+    # extern components
+    esp_eth esp_common driver nvs_flash
+    # internal components
+    vig_net
+    vig_common
 )
 
-
-target_compile_options(${COMPONENT_LIB} PRIVATE 
-    -std=gnu++23
-    -Wall 
-    -Wextra 
-    -Wpedantic 
-    -Wconversion 
-    -Werror=return-type
-)
+add_compile_options(
+    "-Wall" "-Wextra" "-Werror" 
+    "-Wconversion" "-Werror=return-type" 
+    "-Wno-unused-parameter")

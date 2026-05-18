@@ -1,5 +1,5 @@
 # Can be overridden via command line: make flash PORT=/dev/ttyUSB1
-PORT ?= /dev/ttyUSB0
+PORT ?= /dev/ttyACM1
 
 .PHONY: all build flash monitor clean format lint test-host test-browser
 

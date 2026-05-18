@@ -32,3 +32,9 @@ tests/browser/playwright/.cache/
 .LSOverride
 Thumbs.db
 ehthumbs.db
+
+# ========================================
+# Local Dev Files
+# ========================================
+.env
+.local

@@ -4,8 +4,14 @@
             "name": "ESP32-P4-C++23",
             "cStandard": "gnu17",
             "cppStandard": "gnu++23",
-            "compileCommands": "${workspaceFolder}/build/compile_commands.json",
-            "configurationProvider": "ms-vscode.cmake-tools"
+            "compileCommands": [
+                "${workspaceFolder}/build/compile_commands.json"
+            ],
+            "configurationProvider": "ms-vscode.cmake-tools",
+            "includePath": [
+                "${default}",
+                "${workspaceFolder}/build/config"
+            ]
         }
     ],
     "version": 4

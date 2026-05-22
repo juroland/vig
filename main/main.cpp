@@ -9,6 +9,7 @@ static const char *TAG = "VIG";
 
 namespace vig
 {
+
     class App
     {
     public:

@@ -1,7 +1,15 @@
 # Can be overridden via command line: make flash PORT=/dev/ttyUSB1
 PORT ?= /dev/ttyACM1
 
-.PHONY: all build flash monitor clean format lint test-host test-browser
+ifeq ($(IDF_PATH),)
+    IDF_PATH := $(HOME)/.espressif/v6.0.1/esp-idf
+endif
+
+# Automatically wrap all make recipes inside the ESP-IDF shell environment
+SHELL := /bin/bash
+.SHELLFLAGS := -c 'source $(IDF_PATH)/export.sh && eval "$$0"'
+
+.PHONY: all build flash monitor clean format lint test-host test-browser deps
 
 all: build
 
@@ -16,8 +24,6 @@ monitor:
 
 clean:
 	idf.py fullclean
-
-# Tools
 
 menuconfig:
 	idf.py menuconfig

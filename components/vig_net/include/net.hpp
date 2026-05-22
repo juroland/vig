@@ -1,4 +1,5 @@
-#pragma once
+#ifndef VIG_NET_NET_HPP
+#define VIG_NET_NET_HPP
 
 #include <memory>
 #include <string>
@@ -49,3 +50,5 @@ namespace vig::net
     };
 
 } // namespace vig::net
+
+#endif // VIG_NET_NET_HPP

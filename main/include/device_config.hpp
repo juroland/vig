@@ -1,4 +1,5 @@
-#pragma once
+#ifndef VIG_MAIN_DEVICE_CONFIG_HPP
+#define VIG_MAIN_DEVICE_CONFIG_HPP
 
 #include <string_view>
 #include "sdkconfig.h"
@@ -31,3 +32,5 @@ namespace vig::config
     constexpr int STREAM_MAX_CLIENTS = CONFIG_VIG_STREAM_MAX_CLIENTS;
 
 } // namespace visionlink::config
+
+#endif // VIG_MAIN_DEVICE_CONFIG_HPP

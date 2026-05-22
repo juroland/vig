@@ -1,4 +1,5 @@
-#pragma once
+#ifndef VIG_COMMON_ERROR_TYPES_HPP
+#define VIG_COMMON_ERROR_TYPES_HPP
 
 #include <expected>
 #include <string_view>
@@ -66,3 +67,5 @@ namespace vig
     }
 
 } // namespace vig
+
+#endif // VIG_COMMON_ERROR_TYPES_HPP

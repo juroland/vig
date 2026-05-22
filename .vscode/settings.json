@@ -11,5 +11,12 @@
     // Ensure the terminal loads your ESP-IDF environment automatically if configured globally
     "terminal.integrated.env.linux": {
         "IDF_PATH": "${env:IDF_PATH}"
-    }
+    },
+    "[cmake]": {
+        "editor.defaultFormatter": "KylinIdeTeam.cmake-intellisence"
+    },
+    "idf.currentSetup": "${env:HOME}/.espressif/v6.0.1/esp-idf",
+    "cSpell.words": [
+        "Psram"
+    ],
 }

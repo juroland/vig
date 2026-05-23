@@ -11,9 +11,10 @@ idf_component_register(
     # internal components
     vig_net
     vig_common
+    vig_camera
 )
 
 add_compile_options(
-    "-Wall" "-Wextra" "-Werror" 
-    "-Wconversion" "-Werror=return-type" 
+    "-Wall" "-Wextra" "-Werror"
+    "-Wconversion" "-Werror=return-type"
     "-Wno-unused-parameter")

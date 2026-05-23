@@ -24,6 +24,7 @@ namespace vig::config
 #endif
     constexpr int CAMERA_WIDTH = CONFIG_VIG_CAMERA_WIDTH;
     constexpr int CAMERA_HEIGHT = CONFIG_VIG_CAMERA_HEIGHT;
+    constexpr int CAMERA_TARGET_FPS = 30;
     constexpr int ENCODER_BITRATE_KBPS = CONFIG_VIG_ENCODER_BITRATE_KBPS;
     constexpr int ENCODER_GOP = CONFIG_VIG_ENCODER_GOP;
 
@@ -31,6 +32,6 @@ namespace vig::config
     constexpr int STREAM_PORT = CONFIG_VIG_STREAM_PORT;
     constexpr int STREAM_MAX_CLIENTS = CONFIG_VIG_STREAM_MAX_CLIENTS;
 
-} // namespace visionlink::config
+} // namespace vig::config
 
 #endif // VIG_MAIN_DEVICE_CONFIG_HPP

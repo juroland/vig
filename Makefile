@@ -5,6 +5,8 @@ ifeq ($(IDF_PATH),)
     IDF_PATH := $(HOME)/.espressif/v6.0.1/esp-idf
 endif
 
+VSCODE_CLANG_FORMAT=$(ls -d $HOME/.vscode/extensions/ms-vscode.cpptools-*-linux-x64/LLVM/bin/clang-format | tail -n 1)
+
 # Automatically wrap all make recipes inside the ESP-IDF shell environment
 SHELL := /bin/bash
 .SHELLFLAGS := -c 'source $(IDF_PATH)/export.sh && eval "$$0"'
@@ -35,5 +37,4 @@ format:
 	find main components -iname '*.hpp' -o -iname '*.cpp' | xargs clang-format -i
 
 lint:
-	# Run clang-tidy using the generated compile_commands.json
 	find main components -iname '*.hpp' -o -iname '*.cpp' | xargs clang-tidy -p build/

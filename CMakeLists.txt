@@ -7,11 +7,10 @@ set(ENV{IDF_TOOLCHAIN} "clang")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
-project(.)
+project(vig)
 
 # Fix compatibility issue
 if(TARGET __idf_espressif__esp_ipa)
     target_compile_options(__idf_espressif__esp_ipa PRIVATE "-include" "stddef.h")
 endif()
-
 

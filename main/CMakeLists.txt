@@ -14,6 +14,11 @@ idf_component_register(
     vig_camera
 )
 
+# Inject the version string into the main component during build phase
+if(NOT CMAKE_SCRIPT_MODE_FILE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE VIG_VERSION=\"${PROJECT_VER}\")
+endif()
+
 add_compile_options(
     "-Wall" "-Wextra" "-Werror"
     "-Wconversion" "-Werror=return-type"

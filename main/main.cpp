@@ -12,6 +12,7 @@
 #include "error_types.hpp"
 #include "h264_encoder.hpp"
 #include "net.hpp"
+#include "stream_server.hpp"
 
 #include <memory>
 #include <string>
@@ -60,9 +61,9 @@ public:
     if (!enc_res)
       return enc_res;
 
-    // auto stream_res = stream_server_.start(config::STREAM_PORT);
-    // if (!stream_res)
-    //     return stream_res;
+    auto stream_res = stream_server_.start(config::STREAM_PORT);
+    if (!stream_res)
+      return stream_res;
 
     ESP_LOGI(TAG, "Device initialized successfully.");
     return {};
@@ -82,7 +83,7 @@ public:
 private:
   std::unique_ptr<camera::CameraManager> camera_;
   camera::H264Encoder encoder_;
-  // net::StreamServer stream_server_;
+  net::StreamServer stream_server_;
 
   void camera_task() {
     ESP_LOGI(TAG, "Camera task started on core %d", xPortGetCoreID());
@@ -107,7 +108,7 @@ private:
         ESP_LOGE(TAG, "Encode failed: %.*s", (int)to_string(encoded_res.error()).size(),
                  to_string(encoded_res.error()).data());
       } else {
-        // stream_server_.push_frame(encoded_res.value());
+        stream_server_.push_frame(encoded_res.value());
         if (++frame_idx % 100 == 0) {
           ESP_LOGI(TAG, "Processed 100 frames (Current PTS: %llu)", current_pts);
         }
@@ -119,6 +120,7 @@ private:
 } // namespace vig
 
 extern "C" void app_main() {
+
   xTaskCreatePinnedToCore(
       [](void *arg) {
         ESP_LOGI("Main", "Starting Main App Task...");

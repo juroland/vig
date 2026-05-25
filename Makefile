@@ -36,5 +36,8 @@ save-config:
 format:
 	find main components -iname '*.hpp' -o -iname '*.cpp' | xargs clang-format -i
 
-lint:
-	find main components -iname '*.hpp' -o -iname '*.cpp' | xargs clang-tidy -p build/
+build_clang/compile_commands.json:
+	idf.py -B build_clang -DIDF_TOOLCHAIN=clang reconfigure
+
+lint: build_clang/compile_commands.json
+	find main components -iname '*.hpp' -o -iname '*.cpp' | xargs clang-tidy -p build_clang/

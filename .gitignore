@@ -2,6 +2,7 @@
 # ESP-IDF Core
 # ========================================
 build/
+build_clang/
 managed_components/
 sdkconfig.old
 sdkconfig

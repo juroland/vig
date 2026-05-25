@@ -97,7 +97,7 @@ Expected<EncodedFrame> H264Encoder::encode(const uint8_t *yuv_data, size_t size,
 
   static uint32_t frame_count = 0;
   frame_count++;
-  if (frame_count % 250 == 0) {
+  if (frame_count <= 100 || frame_count % 50 == 0) {
     ESP_LOGI("H264Encoder", "Encoded frame %d: type = %d, keyframe = %d, len = %d",
              (int)frame_count, (int)out_frame.frame_type, (int)frame.is_keyframe,
              (int)out_frame.length);

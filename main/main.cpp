@@ -90,10 +90,18 @@ public:
     }
     ESP_ERROR_CHECK(ret);
 
-    ESP_LOGI(TAG, "Initializing Ethernet...");
-    auto net_res = net::NetworkManager::instance().init_ethernet();
+    ESP_LOGI(TAG, "Initializing Network...");
+    Expected<void> net_res;
+    if constexpr (config::USE_WIFI) {
+      ESP_LOGI(TAG, "Using WiFi (SSID: %s)", std::string(config::WIFI_SSID).c_str());
+      net_res = net::NetworkManager::instance().init_wifi(
+          std::string(config::WIFI_SSID), std::string(config::WIFI_PASSWORD));
+    } else {
+      ESP_LOGI(TAG, "Using Ethernet");
+      net_res = net::NetworkManager::instance().init_ethernet();
+    }
     if (!net_res) {
-      ESP_LOGE(TAG, "Ethernet init failed");
+      ESP_LOGE(TAG, "Network init failed");
       return net_res;
     }
 

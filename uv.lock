@@ -847,7 +847,7 @@ wheels = [
 ]
 
 [[package]]
-name = "vig"
+name = "vigo"
 source = { virtual = "." }
 dependencies = [
     { name = "pre-commit" },

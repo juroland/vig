@@ -1,5 +1,5 @@
 [project]
-name = "vig"
+name = "vigo"
 requires-python = ">=3.12"
 dependencies = [
     "pre-commit>=4.6.0",

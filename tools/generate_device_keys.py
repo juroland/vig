@@ -31,7 +31,7 @@ def generate_keys():
             "-key", key_path,
             "-out", cert_path,
             "-days", "3650",
-            "-subj", "/CN=VigDevice"
+            "-subj", "/CN=VigoDevice"
         ]
         subprocess.run(req_cmd, check=True, capture_output=True)
 
@@ -73,8 +73,8 @@ def main():
     key_config_val = format_pem_for_sdkconfig(key_pem)
 
     lines_to_add = [
-        f"CONFIG_VIG_DTLS_CERT_PEM={cert_config_val}\n",
-        f"CONFIG_VIG_DTLS_KEY_PEM={key_config_val}\n"
+        f"CONFIG_VIGO_DTLS_CERT_PEM={cert_config_val}\n",
+        f"CONFIG_VIGO_DTLS_KEY_PEM={key_config_val}\n"
     ]
 
     if target_file:
@@ -83,7 +83,7 @@ def main():
             print(f"Error: Target file '{target_file}' does not exist.", file=sys.stderr)
             sys.exit(1)
 
-        # Read target file to see if CONFIG_VIG_DTLS_CERT_PEM/KEY_PEM are already there
+        # Read target file to see if CONFIG_VIGO_DTLS_CERT_PEM/KEY_PEM are already there
         with open(target_file, "r") as f:
             content = f.read()
 
@@ -91,7 +91,7 @@ def main():
         lines = content.splitlines(keepends=True)
         new_lines = []
         for line in lines:
-            if not line.startswith("CONFIG_VIG_DTLS_CERT_PEM=") and not line.startswith("CONFIG_VIG_DTLS_KEY_PEM="):
+            if not line.startswith("CONFIG_VIGO_DTLS_CERT_PEM=") and not line.startswith("CONFIG_VIGO_DTLS_KEY_PEM="):
                 new_lines.append(line)
 
         # Ensure trailing newline in existing content if not empty

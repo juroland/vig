@@ -14,17 +14,18 @@
 #include "h264_encoder.hpp"
 #include "net.hpp"
 #include "stream_server.hpp"
-#include "vig_backend.hpp"
-#include "vig_telemetry.hpp"
-#include "vig_whip.hpp"
+#include "vigo_backend.hpp"
+#include "vigo_telemetry.hpp"
+#include "vigo_whip.hpp"
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
 
-static const char *TAG = "VigDevice";
+static const char *TAG = "VigoDevice";
 
-namespace vig {
+namespace vigo {
 
 static std::string extract_host(std::string_view url) {
   size_t scheme_pos = url.find("://");
@@ -175,6 +176,7 @@ private:
   std::mutex latest_frame_mutex_;
   camera::CameraFrame latest_frame_;
   bool has_latest_frame_{false};
+  std::atomic<bool> request_telemetry_snapshot_{false};
 
   std::mutex latest_snapshot_mutex_;
   std::vector<uint8_t> latest_snapshot_;
@@ -190,6 +192,16 @@ private:
     while (true) {
       ESP_LOGI(TAG, "Collecting telemetry data...");
 
+      // Signal camera_task to capture the next frame on-demand
+      request_telemetry_snapshot_ = true;
+
+      // Wait a short time for camera_task to perform the copy (up to 200ms)
+      int wait_cycles = 0;
+      while (request_telemetry_snapshot_ && wait_cycles < 20) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+        wait_cycles++;
+      }
+
       camera::CameraFrame frame_copy;
       bool got_frame = false;
       {
@@ -198,6 +210,7 @@ private:
           frame_copy.width = latest_frame_.width;
           frame_copy.height = latest_frame_.height;
           frame_copy.data.assign(latest_frame_.data.begin(), latest_frame_.data.end());
+          has_latest_frame_ = false; // Reset flag for next demand cycle
           got_frame = true;
         }
       }
@@ -249,8 +262,9 @@ private:
               whip_publisher_.reset();
             }
 
-            whip_publisher_ =
-                std::make_unique<whip::WhipPublisher>(target_whip_url, hb.stream_token);
+            whip_publisher_ = std::make_unique<whip::WhipPublisher>(
+                target_whip_url, hb.stream_token, std::string(config::DTLS_CERT_PEM),
+                std::string(config::DTLS_KEY_PEM));
             auto start_res = whip_publisher_->start();
             if (!start_res) {
               ESP_LOGE(TAG, "Failed to start WHIP publisher: %.*s",
@@ -304,14 +318,14 @@ private:
         ESP_LOGE(TAG, "Encode failed: %.*s", (int)to_string(encoded_res.error()).size(),
                  to_string(encoded_res.error()).data());
       } else {
-        // Save the latest raw frame for telemetry snapshots (once per second is
-        // sufficient)
-        if (frame_idx % 30 == 0) {
+        // Save the latest raw frame for telemetry snapshots on-demand
+        if (request_telemetry_snapshot_) {
           std::lock_guard<std::mutex> lock(latest_frame_mutex_);
           latest_frame_.width = frame_res->width;
           latest_frame_.height = frame_res->height;
           latest_frame_.data.assign(frame_res->data.begin(), frame_res->data.end());
           has_latest_frame_ = true;
+          request_telemetry_snapshot_ = false; // Done copying, reset request flag
         }
 
         // Create shared_ptr once (move the encoded data - zero copy after this)
@@ -336,20 +350,20 @@ private:
   }
 };
 
-} // namespace vig
+} // namespace vigo
 
 extern "C" void app_main() {
 
   xTaskCreatePinnedToCore(
       [](void *arg) {
         ESP_LOGI("Main", "Starting Main App Task...");
-        static vig::Device device;
+        static vigo::Device device;
 
         auto start_res = device.start();
         if (!start_res) {
           ESP_LOGE("Main", "Failed to start device: %.*s",
-                   (int)vig::to_string(start_res.error()).size(),
-                   vig::to_string(start_res.error()).data());
+                   (int)vigo::to_string(start_res.error()).size(),
+                   vigo::to_string(start_res.error()).data());
           vTaskDelete(nullptr);
           return;
         }

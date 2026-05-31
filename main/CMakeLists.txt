@@ -9,18 +9,18 @@ idf_component_register(
     # extern components
     esp_eth esp_common driver nvs_flash esp_wifi_remote esp_hosted
     # internal components
-    vig_net
-    vig_common
-    vig_camera
-    vig_stream_server
-    vig_backend
-    vig_telemetry
-    vig_whip
+    vigo_net
+    vigo_common
+    vigo_camera
+    vigo_stream_server
+    vigo_backend
+    vigo_telemetry
+    vigo_whip
 )
 
 # Inject the version string into the main component during build phase
 if(NOT CMAKE_SCRIPT_MODE_FILE)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE VIG_VERSION=\"${PROJECT_VER}\")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE VIGO_VERSION=\"${PROJECT_VER}\")
 endif()
 
 add_compile_options(

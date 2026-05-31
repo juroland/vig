@@ -32,9 +32,9 @@ For in-depth educational explanations, protocol flow charts, and cryptographic a
 
 ### Configuration Parameters Overview
 
-1. **`CONFIG_VIG_DEVICE_TOKEN` (Device Authentication)**:
+1. **`CONFIG_VIGO_DEVICE_TOKEN` (Device Authentication)**:
    The unique long-lived static bearer token configured on the device. It authenticates control plane HTTPS signaling/heartbeats (e.g. `Bearer <TOKEN>`) to dynamically obtain single-use session tokens from the backend.
-2. **`CONFIG_VIG_DTLS_CERT_PEM` & `CONFIG_VIG_DTLS_KEY_PEM` (Stream Encryption)**:
+2. **`CONFIG_VIGO_DTLS_CERT_PEM` & `CONFIG_VIGO_DTLS_KEY_PEM` (Stream Encryption)**:
    The device-specific self-signed certificate and ECDSA private key. These secure the P2P UDP video stream via **DTLS-SRTP** on-the-fly, utilizing SDP fingerprint matching without backend database storage.
 
 ---
@@ -51,4 +51,4 @@ make generate-keys DEVICE=jr
 make build DEVICE=jr
 ```
 
-This updates the respective `<device_name>.defaults` file with the custom `CONFIG_VIG_DTLS_CERT_PEM` and `CONFIG_VIG_DTLS_KEY_PEM` configuration options, completely overriding the insecure shared fallbacks.
+This updates the respective `<device_name>.defaults` file with the custom `CONFIG_VIGO_DTLS_CERT_PEM` and `CONFIG_VIGO_DTLS_KEY_PEM` configuration options, completely overriding the insecure shared fallbacks.

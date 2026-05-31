@@ -1,4 +1,4 @@
-# VIG : Video IoT Guardian
+# VIGO : Video Intelligence Guard Outpost
 
 Edge vision and networking firmware targeting the Waveshare ESP32-P4. Built with modern C++23, strict static analysis, and a hardware abstraction layer (HAL) over ESP-IDF.
 

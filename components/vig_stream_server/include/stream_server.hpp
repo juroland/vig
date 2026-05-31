@@ -5,6 +5,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "h264_encoder.hpp"
+#include <functional>
 #include <list>
 #include <memory>
 #include <vector>
@@ -20,10 +21,12 @@ public:
   StreamServer(const StreamServer &) = delete;
   StreamServer &operator=(const StreamServer &) = delete;
 
-  Expected<void> start(int port);
+  using SnapshotCallback = std::function<std::vector<uint8_t>()>;
+
+  Expected<void> start(int port, SnapshotCallback snapshot_cb = nullptr);
   void stop();
 
-  void push_frame(const camera::EncodedFrame &frame);
+  void push_frame(const std::shared_ptr<camera::EncodedFrame> &frame);
 
 private:
   httpd_handle_t server_handle_{nullptr};
@@ -33,6 +36,8 @@ private:
     bool ready;
   };
   std::list<Client> clients_;
+
+  SnapshotCallback snapshot_cb_ = nullptr;
 
   static esp_err_t ws_handler(httpd_req_t *req);
   static void async_send_callback(void *arg);

@@ -10,7 +10,7 @@ constexpr std::string_view HARDWARE_ID = CONFIG_VIG_HARDWARE_ID;
 constexpr std::string_view FIRMWARE_VERSION = VIG_VERSION;
 constexpr std::string_view API_BASE_URL = CONFIG_VIG_API_URL;
 constexpr std::string_view DEVICE_TOKEN = CONFIG_VIG_DEVICE_TOKEN;
-constexpr std::string_view HEARTBEAT_ENDPOINT = "/devices/heartbeat";
+constexpr std::string_view WHIP_URL = CONFIG_VIG_WHIP_URL;
 
 constexpr int HEARTBEAT_INTERVAL_MS = CONFIG_VIG_HEARTBEAT_INTERVAL_MS;
 constexpr int NETWORK_RETRY_DELAY_MS = 5000;

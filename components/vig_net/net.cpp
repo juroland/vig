@@ -1,5 +1,6 @@
 #include "net.hpp"
 #include "driver/gpio.h"
+#include "esp_crt_bundle.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
@@ -13,6 +14,7 @@ HttpClient::HttpClient(const std::string &url, const std::string &device_token) 
   esp_http_client_config_t config = {};
   config.url = url.c_str();
   config.method = HTTP_METHOD_POST;
+  config.crt_bundle_attach = esp_crt_bundle_attach;
   client_handle_ = esp_http_client_init(&config);
 
   auth_header_ = "Bearer " + device_token;
@@ -46,32 +48,47 @@ Expected<std::string> HttpClient::post_json_with_response(const std::string &pay
 
   esp_http_client_set_header(client_handle_, "Content-Type", "application/json");
   esp_http_client_set_header(client_handle_, "Authorization", auth_header_.c_str());
-  esp_http_client_set_post_field(client_handle_, payload.c_str(), payload.length());
 
-  esp_err_t err = esp_http_client_perform(client_handle_);
+  esp_err_t err = esp_http_client_open(client_handle_, payload.length());
   if (err != ESP_OK) {
+    return std::unexpected(DeviceError::HttpRequestFailed);
+  }
+
+  int write_len =
+      esp_http_client_write(client_handle_, payload.c_str(), payload.length());
+  if (write_len < 0) {
+    esp_http_client_close(client_handle_);
+    return std::unexpected(DeviceError::HttpRequestFailed);
+  }
+
+  int content_length = esp_http_client_fetch_headers(client_handle_);
+  if (content_length < 0) {
+    esp_http_client_close(client_handle_);
     return std::unexpected(DeviceError::HttpRequestFailed);
   }
 
   int status = esp_http_client_get_status_code(client_handle_);
   if (status < 200 || status >= 300) {
     ESP_LOGW(TAG, "HTTP error status %d", status);
+    esp_http_client_close(client_handle_);
     return std::unexpected(DeviceError::HttpRequestFailed);
   }
 
-  int content_length = esp_http_client_get_content_length(client_handle_);
-  if (content_length <= 0 || content_length > 4096) {
-    return std::string{};
+  std::string response;
+  char buf[512];
+  while (true) {
+    int read = esp_http_client_read_response(client_handle_, buf, sizeof(buf));
+    if (read < 0) {
+      esp_http_client_close(client_handle_);
+      return std::unexpected(DeviceError::HttpPayloadError);
+    }
+    if (read == 0) {
+      break;
+    }
+    response.append(buf, static_cast<size_t>(read));
   }
 
-  std::string response(static_cast<size_t>(content_length), '\0');
-  int read =
-      esp_http_client_read_response(client_handle_, response.data(), content_length);
-  if (read < 0) {
-    return std::unexpected(DeviceError::HttpPayloadError);
-  }
-  response.resize(static_cast<size_t>(read));
-
+  esp_http_client_close(client_handle_);
   return response;
 }
 

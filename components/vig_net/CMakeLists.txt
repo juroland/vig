@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS "net.cpp"
     INCLUDE_DIRS "include"
-    REQUIRES "esp_eth" "esp_http_client" "esp_netif" "esp_driver_gpio"
+    REQUIRES "esp_eth" "esp_http_client" "esp_netif" "esp_driver_gpio" "mbedtls"
     # intern
     "vig_common"
 )

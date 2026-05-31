@@ -17,7 +17,8 @@ StreamServer::~StreamServer() {
   }
 }
 
-Expected<void> StreamServer::start(int port) {
+Expected<void> StreamServer::start(int port, SnapshotCallback snapshot_cb) {
+  snapshot_cb_ = snapshot_cb;
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = port;
   config.ctrl_port = port + 1;
@@ -67,6 +68,27 @@ Expected<void> StreamServer::start(int port) {
   if (httpd_register_uri_handler(server_handle_, &ws_uri) != ESP_OK) {
     ESP_LOGE(TAG, "Failed to register WebSocket URI handler");
     return std::unexpected(DeviceError::StreamServerInitFailed);
+  }
+
+  // Snapshot URI
+  httpd_uri_t snap_uri = {};
+  snap_uri.uri = "/snapshot";
+  snap_uri.method = HTTP_GET;
+  snap_uri.handler = [](httpd_req_t *req) {
+    auto *self = static_cast<StreamServer *>(req->user_ctx);
+    if (self->snapshot_cb_) {
+      auto jpeg_data = self->snapshot_cb_();
+      if (!jpeg_data.empty()) {
+        httpd_resp_set_type(req, "image/jpeg");
+        return httpd_resp_send(req, (const char *)jpeg_data.data(), jpeg_data.size());
+      }
+    }
+    httpd_resp_send_404(req);
+    return ESP_FAIL;
+  };
+  snap_uri.user_ctx = this;
+  if (httpd_register_uri_handler(server_handle_, &snap_uri) != ESP_OK) {
+    ESP_LOGW(TAG, "Failed to register snapshot URI handler");
   }
 
   return {};
@@ -133,35 +155,16 @@ esp_err_t StreamServer::ws_handler(httpd_req_t *req) {
   return ESP_OK;
 }
 
-void StreamServer::push_frame(const camera::EncodedFrame &frame) {
+void StreamServer::push_frame(const std::shared_ptr<camera::EncodedFrame> &frame) {
   if (!clients_mutex_ || !server_handle_)
     return;
 
-  // Wrap the frame in a shared_ptr once to avoid multiple copies
-  auto shared_frame = std::make_shared<camera::EncodedFrame>(frame);
-
   xSemaphoreTake(clients_mutex_, portMAX_DELAY);
-
-  if (!clients_.empty()) {
-    static uint32_t push_log_count = 0;
-    if (push_log_count++ % 50 == 0) {
-      ESP_LOGI(TAG, "push_frame active: %u connected client(s)", clients_.size());
-    }
-  }
 
   auto it = clients_.begin();
   while (it != clients_.end()) {
-    // Robustly check if the client socket is still active
-    struct sockaddr_storage addr;
-    socklen_t addr_len = sizeof(addr);
-    if (getpeername(it->fd, (struct sockaddr *)&addr, &addr_len) != 0) {
-      ESP_LOGI(TAG, "Client socket FD %d closed/dead, removing", it->fd);
-      it = clients_.erase(it);
-      continue;
-    }
-
     // Promote waiting clients if we have a keyframe
-    if (frame.is_keyframe && !it->ready) {
+    if (frame->is_keyframe && !it->ready) {
       it->ready = true;
       ESP_LOGI(TAG, "Client (FD: %d) promoted to ready (Keyframe received)", it->fd);
     }
@@ -172,7 +175,7 @@ void StreamServer::push_frame(const camera::EncodedFrame &frame) {
     }
 
     AsyncSendArg *arg = new (std::nothrow)
-        AsyncSendArg{.hd = server_handle_, .fd = it->fd, .frame = shared_frame};
+        AsyncSendArg{.hd = server_handle_, .fd = it->fd, .frame = frame};
 
     if (arg == nullptr) {
       ESP_LOGE(TAG, "OOM: failed to allocate send arg");
@@ -205,7 +208,8 @@ void StreamServer::async_send_callback(void *arg) {
   esp_err_t ret = httpd_ws_send_frame_async(send_arg->hd, send_arg->fd, &ws_pkt);
 
   if (ret != ESP_OK) {
-    ESP_LOGD(TAG, "Async send failed: %d", ret);
+    ESP_LOGD(TAG, "Async send failed for FD %d: %d, will be cleaned up", send_arg->fd,
+             ret);
   }
 
   delete send_arg;

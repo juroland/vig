@@ -9,6 +9,7 @@
 #include "mbedtls/md.h"
 #include "mbedtls/net_sockets.h"
 #include "mbedtls/ssl.h"
+#include "mbedtls/timing.h"
 #include "mbedtls/x509_crt.h"
 
 #include "psa/crypto.h"
@@ -66,7 +67,14 @@ private:
   mbedtls_ssl_config ssl_conf_;
   mbedtls_x509_crt cert_;
   mbedtls_pk_context pkey_;
+  struct DtlsTimer {
+    int64_t start_time_us{0};
+    uint32_t int_ms{0};
+    uint32_t fin_ms{0};
+  } timer_ctx_;
   bool dtls_initialized_{false};
+  bool dtls_role_is_server_{false}; // true if remote answered a=setup:active
+  bool received_client_hello_{false};
 
   // SRTP transmit context
   SrtpContext srtp_send_;
@@ -80,6 +88,10 @@ private:
     bool keys_exported{false};
   } dtls_keys_;
 
+  // UDP datagram buffering for DTLS-over-UDP partial reads
+  std::vector<uint8_t> rx_buffer_;
+  size_t rx_offset_{0};
+
   // RTP state
   uint16_t seq_num_{0};
   uint32_t ssrc_{0};
@@ -91,6 +103,9 @@ private:
 
   /// Generate self-signed ECDSA certificate + private key for DTLS
   Expected<void> generate_dtls_cert();
+
+  /// Configure DTLS SSL session (must be called after DTLS role is known from SDP)
+  Expected<void> configure_dtls_session();
 
   /// Compute the SHA-256 fingerprint of our certificate (for SDP)
   std::string cert_fingerprint_sha256();
@@ -111,6 +126,8 @@ private:
   static int dtls_recv(void *ctx, unsigned char *buf, size_t len);
   static int dtls_recv_timeout(void *ctx, unsigned char *buf, size_t len,
                                uint32_t timeout);
+  static void dtls_timing_set_delay(void *data, uint32_t int_ms, uint32_t fin_ms);
+  static int dtls_timing_get_delay(void *data);
   static void srtp_export_keys_cb(void *p_expkey, mbedtls_ssl_key_export_type type,
                                   const unsigned char *secret, size_t secret_len,
                                   const unsigned char client_random[32],
@@ -126,6 +143,9 @@ private:
   /// Build and transmit one RTP/SRTP packet
   void send_rtp_packet(const uint8_t *payload, size_t size, uint32_t timestamp,
                        bool marker);
+
+  /// Respond to incoming STUN binding requests from the remote peer.
+  void send_stun_binding_response(const uint8_t *tid);
 };
 
 } // namespace vig::whip

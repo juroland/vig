@@ -1,5 +1,6 @@
 #include "net.hpp"
 #include "driver/gpio.h"
+#include "esp_crt_bundle.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
@@ -13,6 +14,7 @@ HttpClient::HttpClient(const std::string &url, const std::string &device_token) 
   esp_http_client_config_t config = {};
   config.url = url.c_str();
   config.method = HTTP_METHOD_POST;
+  config.crt_bundle_attach = esp_crt_bundle_attach;
   client_handle_ = esp_http_client_init(&config);
 
   auth_header_ = "Bearer " + device_token;

@@ -1,5 +1,5 @@
 # Can be overridden via command line: make flash PORT=/dev/ttyUSB1
-PORT ?= /dev/ttyACM1
+PORT ?= /dev/ttyACM0
 
 ifeq ($(IDF_PATH),)
     IDF_PATH := $(HOME)/.espressif/v6.0.1/esp-idf
@@ -16,17 +16,37 @@ ifneq ($(DEVICE),)
     DEVICE_ARG := -DDEVICE=$(DEVICE)
 endif
 
-.PHONY: all build flash monitor clean format lint test-host test-browser deps test-backend-build test-backend-flash test-backend-run
+.PHONY: all build flash monitor clean format lint test-host test-browser deps test-backend-build test-backend-flash test-backend-run generate-keys check-config-sync
 
 all: build
 
-build:
+generate-keys:
+ifeq ($(DEVICE),)
+	@echo "Error: Please specify a DEVICE, e.g., 'make generate-keys DEVICE=jr'"
+	@exit 1
+else
+	python3 tools/generate_device_keys.py configs/$(DEVICE).defaults
+endif
+
+check-config-sync:
+ifneq ($(DEVICE),)
+	@if [ -f configs/$(DEVICE).defaults ] && [ -f configs/sdkconfig.$(DEVICE) ] && [ configs/$(DEVICE).defaults -nt configs/sdkconfig.$(DEVICE) ]; then \
+		echo "Detected changes in configs/$(DEVICE).defaults. Removing stale configs/sdkconfig.$(DEVICE)..."; \
+		rm -f configs/sdkconfig.$(DEVICE); \
+	fi
+	@if [ -f sdkconfig.defaults ] && [ -f configs/sdkconfig.$(DEVICE) ] && [ sdkconfig.defaults -nt configs/sdkconfig.$(DEVICE) ]; then \
+		echo "Detected changes in sdkconfig.defaults. Removing stale configs/sdkconfig.$(DEVICE)..."; \
+		rm -f configs/sdkconfig.$(DEVICE); \
+	fi
+endif
+
+build: check-config-sync
 	idf.py $(DEVICE_ARG) build
 
-flash:
+flash: check-config-sync
 	idf.py $(DEVICE_ARG) -p $(PORT) flash
 
-monitor:
+monitor: check-config-sync
 	idf.py $(DEVICE_ARG) -p $(PORT) monitor
 
 clean:

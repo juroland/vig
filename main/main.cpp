@@ -212,8 +212,13 @@ private:
         ESP_LOGI(TAG, "Heartbeat ACK received. Stream Token size: %zu",
                  hb.stream_token.length());
 
-        std::string api_host = extract_host(config::API_BASE_URL);
-        std::string target_whip_url = sanitize_whip_url(hb.whip_url, api_host);
+        std::string target_whip_url;
+        if (!config::WHIP_URL.empty()) {
+          target_whip_url = std::string(config::WHIP_URL);
+        } else {
+          std::string api_host = extract_host(config::API_BASE_URL);
+          target_whip_url = sanitize_whip_url(hb.whip_url, api_host);
+        }
 
         // Append token as a query parameter for robust compatibility with MediaMTX auth
         // hooks
@@ -305,12 +310,12 @@ private:
 
         stream_server_.push_frame(encoded_res.value());
 
-        // Stream to the WHIP endpoint if active
-        {
-          std::lock_guard<std::mutex> lock(whip_mutex_);
+        // Stream to the WHIP endpoint if active (non-blocking to avoid WDT during handshake)
+        if (whip_mutex_.try_lock()) {
           if (whip_publisher_) {
             whip_publisher_->push_frame(encoded_res.value());
           }
+          whip_mutex_.unlock();
         }
 
         if (++frame_idx % 100 == 0) {

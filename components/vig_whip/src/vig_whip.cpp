@@ -1,21 +1,35 @@
 #include "vig_whip.hpp"
+#include "esp_crt_bundle.h"
+#include "esp_timer.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "h264_encoder.hpp"
 #include "lwip/sockets.h"
+#include "mbedtls/error.h"
 #include "mbedtls/md.h"
 #include "mbedtls/psa_util.h"
 #include "mbedtls/ssl.h"
 #include "mbedtls/x509_crt.h"
 #include "psa/crypto.h"
 #include "sdkconfig.h"
+#include "mbedtls/debug.h"
 #include <algorithm>
 #include <arpa/inet.h>
 #include <cstring>
+#include <netdb.h>
 #include <sstream>
 
 static const char *TAG = "VigWhip";
+
+// static debug callback for mbedTLS
+static void mbedtls_debug_cb(void *ctx, int level, const char *file, int line, const char *str) {
+  std::string s(str);
+  while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) {
+    s.pop_back();
+  }
+  ESP_LOGI("mbedtls", "[%d, %s:%d] %s", level, file, line, s.c_str());
+}
 
 // Helper CRC32 implementation for STUN packet fingerprint validation
 static uint32_t crc32(const uint8_t *data, size_t len) {
@@ -116,6 +130,90 @@ static psa_status_t psa_hmac_sha1(const uint8_t *key, size_t key_len,
 
 namespace vig::whip {
 
+static std::string unescape_pem(const std::string &input) {
+  std::string output;
+  output.reserve(input.length());
+  for (size_t i = 0; i < input.length(); ++i) {
+    if (i + 2 < input.length() && input[i] == '\\' && input[i + 1] == '\\' && input[i + 2] == 'n') {
+      output += '\n';
+      i += 2;
+    } else if (i + 1 < input.length() && input[i] == '\\' && input[i + 1] == 'n') {
+      output += '\n';
+      i++;
+    } else if (i + 2 < input.length() && input[i] == '\\' && input[i + 1] == '\\' && input[i + 2] == 'r') {
+      output += '\r';
+      i += 2;
+    } else if (i + 1 < input.length() && input[i] == '\\' && input[i + 1] == 'r') {
+      output += '\r';
+      i++;
+    } else {
+      output += input[i];
+    }
+  }
+  return output;
+}
+
+static bool is_private_ip(const std::string &ip) {
+  if (ip.empty()) return true;
+  if (ip == "127.0.0.1" || ip == "0.0.0.0" || ip == "localhost") return true;
+  
+  if (ip.rfind("10.", 0) == 0) return true;
+  if (ip.rfind("192.168.", 0) == 0) return true;
+  
+  if (ip.rfind("172.", 0) == 0) {
+    size_t dot = ip.find('.', 4);
+    if (dot != std::string::npos) {
+      std::string s_octet2 = ip.substr(4, dot - 4);
+      bool all_digits = !s_octet2.empty();
+      for (char c : s_octet2) {
+        if (!isdigit(c)) {
+          all_digits = false;
+          break;
+        }
+      }
+      if (all_digits) {
+        int octet2 = std::stoi(s_octet2);
+        if (octet2 >= 16 && octet2 <= 31) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+static std::string extract_host_from_url(const std::string &url) {
+  size_t host_start = url.find("://");
+  if (host_start == std::string::npos) {
+    host_start = 0;
+  } else {
+    host_start += 3;
+  }
+  size_t host_end = url.find_first_of(":/", host_start);
+  if (host_end == std::string::npos) {
+    return url.substr(host_start);
+  }
+  return url.substr(host_start, host_end - host_start);
+}
+
+static std::string resolve_hostname(const std::string &hostname) {
+  struct addrinfo hints = {}, *res = nullptr;
+  hints.ai_family = AF_INET;
+  hints.ai_socktype = SOCK_DGRAM;
+
+  int err = getaddrinfo(hostname.c_str(), nullptr, &hints, &res);
+  if (err != 0 || res == nullptr) {
+    ESP_LOGE("VigWhip", "DNS lookup failed for %s, err=%d", hostname.c_str(), err);
+    return hostname;
+  }
+
+  struct sockaddr_in *ipv4 = (struct sockaddr_in *)res->ai_addr;
+  char ip_str[INET_ADDRSTRLEN];
+  inet_ntop(AF_INET, &(ipv4->sin_addr), ip_str, INET_ADDRSTRLEN);
+  freeaddrinfo(res);
+  return std::string(ip_str);
+}
+
 WhipPublisher::WhipPublisher(const std::string &whip_url,
                              const std::string &stream_token)
     : whip_url_(whip_url), stream_token_(stream_token) {}
@@ -124,6 +222,11 @@ WhipPublisher::~WhipPublisher() { stop(); }
 
 Expected<void> WhipPublisher::start() {
   ESP_LOGI(TAG, "Starting WHIP Publisher session initialization...");
+
+  rx_buffer_.clear();
+  rx_offset_ = 0;
+  timer_ctx_ = DtlsTimer{};
+  received_client_hello_ = false;
 
   // 1. Generate local DTLS Certificates and Private Keys using PSA Hardware Engine
   auto cert_status = generate_dtls_cert();
@@ -153,7 +256,7 @@ Expected<void> WhipPublisher::start() {
     return std::unexpected(sdp_answer_or.error());
   }
   std::string sdp_answer = sdp_answer_or.value();
-  ESP_LOGD(TAG, "Received Remote SDP Answer:\n%s", sdp_answer.c_str());
+  ESP_LOGI(TAG, "Received Remote SDP Answer:\n%s", sdp_answer.c_str());
 
   // 6. Parse the Remote Peer's SDP Answer to extract their ICE credentials and media
   // endpoint
@@ -161,6 +264,13 @@ Expected<void> WhipPublisher::start() {
   if (!parse_status) {
     ESP_LOGE(TAG, "Failed to parse remote SDP answer payload");
     return parse_status;
+  }
+
+  // 6b. Now that we know the DTLS role from the SDP answer, configure the SSL session
+  auto dtls_session_status = configure_dtls_session();
+  if (!dtls_session_status) {
+    ESP_LOGE(TAG, "Failed to configure DTLS session");
+    return dtls_session_status;
   }
 
   // 7. Establish the Media Transport Layer (WebRTC media mandates UDP)
@@ -188,14 +298,30 @@ Expected<void> WhipPublisher::start() {
     stop();
     return ice_status;
   }
+  // 10. Drain any stale STUN responses from the socket before DTLS
+  {
+    uint8_t drain_buf[2048];
+    int drained = 0;
+    while (true) {
+      int r = recv(udp_socket_, drain_buf, sizeof(drain_buf), MSG_DONTWAIT);
+      if (r <= 0) break;
+      drained++;
+      ESP_LOGD(TAG, "Drained stale packet %d: %d bytes, first byte=0x%02X", drained, r, drain_buf[0]);
+    }
+    if (drained > 0) {
+      ESP_LOGI(TAG, "Drained %d stale packets from socket before DTLS", drained);
+    }
+  }
 
-  // 10. Perform the DTLS-SRTP Handshake over the verified UDP route
+  // 11. Perform the DTLS-SRTP Handshake over the verified UDP route
   ESP_LOGI(TAG, "Initiating DTLS-SRTP handshake...");
   int ret;
   int handshake_attempts = 0;
   while ((ret = mbedtls_ssl_handshake(&ssl_ctx_)) != 0) {
     if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
-      ESP_LOGE(TAG, "DTLS handshake failed with error: -0x%04X", -ret);
+      char err_buf[128];
+      mbedtls_strerror(ret, err_buf, sizeof(err_buf));
+      ESP_LOGE(TAG, "DTLS handshake failed with error: -0x%04X (%s)", -ret, err_buf);
       stop();
       return std::unexpected(DeviceError::InternalError);
     }
@@ -225,10 +351,10 @@ void WhipPublisher::stop() {
   if (dtls_initialized_) {
     mbedtls_ssl_free(&ssl_ctx_);
     mbedtls_ssl_config_free(&ssl_conf_);
-    mbedtls_x509_crt_free(&cert_);
-    mbedtls_pk_free(&pkey_);
     dtls_initialized_ = false;
   }
+  mbedtls_x509_crt_free(&cert_);
+  mbedtls_pk_free(&pkey_);
   if (udp_socket_ >= 0) {
     close(udp_socket_);
     udp_socket_ = -1;
@@ -243,6 +369,7 @@ Expected<std::string> WhipPublisher::negotiate_sdp(const std::string &local_sdp)
   config.buffer_size = 4096;
   config.buffer_size_tx = 4096;
   config.timeout_ms = 5000;
+  config.crt_bundle_attach = esp_crt_bundle_attach;
 
   esp_http_client_handle_t client = esp_http_client_init(&config);
   if (!client)
@@ -308,6 +435,7 @@ Expected<void> WhipPublisher::parse_sdp_answer(const std::string &answer) {
   remote_port_ = 0;
   remote_ufrag_ = "";
   remote_pwd_ = "";
+  dtls_role_is_server_ = false;
 
   while (std::getline(stream, line)) {
     if (!line.empty() && line.back() == '\r') {
@@ -347,24 +475,42 @@ Expected<void> WhipPublisher::parse_sdp_answer(const std::string &answer) {
       if (port_end != std::string::npos) {
         remote_port_ = std::stoi(line.substr(port_start, port_end - port_start));
       }
+    } else if (line.rfind("a=setup:", 0) == 0) {
+      std::string setup_role = line.substr(8);
+      // If the remote peer is "active", it will initiate DTLS, so we must be the server.
+      // If the remote peer is "passive", we must initiate DTLS as the client.
+      dtls_role_is_server_ = (setup_role == "active");
+      ESP_LOGI(TAG, "Remote SDP setup role: '%s' -> local DTLS role: %s",
+               setup_role.c_str(), dtls_role_is_server_ ? "SERVER" : "CLIENT");
     }
   }
 
-  // Fallback to extraction from WHIP URL host if candidate IP was local loopback or not
-  // present
+  // Fallback to extraction from WHIP URL host if candidate IP was local loopback or not present
   if (remote_ip_.empty() || remote_ip_ == "127.0.0.1" || remote_ip_ == "0.0.0.0") {
-    size_t host_start = whip_url_.find("://");
-    if (host_start != std::string::npos) {
-      host_start += 3;
-      size_t host_end = whip_url_.find(':', host_start);
-      if (host_end == std::string::npos) {
-        host_end = whip_url_.find('/', host_start);
-      }
-      if (host_end != std::string::npos) {
-        remote_ip_ = whip_url_.substr(host_start, host_end - host_start);
-      }
+    remote_ip_ = extract_host_from_url(whip_url_);
+  }
+
+  // Translate private container/NAT candidates to public-facing load balancer/signaling host if necessary
+  std::string signaling_host = extract_host_from_url(whip_url_);
+  if (is_private_ip(remote_ip_) && !is_private_ip(signaling_host)) {
+    ESP_LOGI(TAG, "Parsed remote candidate IP '%s' is a private IP. Translating to signaling host '%s'...",
+             remote_ip_.c_str(), signaling_host.c_str());
+    std::string resolved = resolve_hostname(signaling_host);
+    if (!resolved.empty() && !is_private_ip(resolved)) {
+      ESP_LOGI(TAG, "Successfully resolved '%s' to public IP '%s'", signaling_host.c_str(), resolved.c_str());
+      remote_ip_ = resolved;
     }
   }
+
+  // If remote_ip_ is still a domain name, resolve it to an IP address so inet_pton works
+  if (!remote_ip_.empty() && !isdigit(remote_ip_[0]) && remote_ip_.find(':') == std::string::npos) {
+    ESP_LOGI(TAG, "Resolving host '%s' to IP address...", remote_ip_.c_str());
+    std::string resolved = resolve_hostname(remote_ip_);
+    if (!resolved.empty()) {
+      remote_ip_ = resolved;
+    }
+  }
+
   if (remote_port_ == 0) {
     remote_port_ = 8189; // MediaMTX WebRTC default UDP ICE Port
   }
@@ -468,30 +614,44 @@ Expected<void> WhipPublisher::generate_dtls_cert() {
     return std::unexpected(DeviceError::InternalError);
   }
 
-  mbedtls_ssl_config_init(&ssl_conf_);
-  mbedtls_ssl_init(&ssl_ctx_);
   mbedtls_pk_init(&pkey_);
   mbedtls_x509_crt_init(&cert_);
 
-  ret = mbedtls_x509_crt_parse(&cert_, (const unsigned char *)CONFIG_VIG_DTLS_CERT_PEM,
-                               strlen(CONFIG_VIG_DTLS_CERT_PEM) + 1);
+  std::string cert_pem = unescape_pem(CONFIG_VIG_DTLS_CERT_PEM);
+  ret = mbedtls_x509_crt_parse(&cert_, (const unsigned char *)cert_pem.c_str(),
+                               cert_pem.length() + 1);
   if (ret != 0) {
     ESP_LOGE(TAG, "Failed to parse cert PEM: -0x%04X", -ret);
     return std::unexpected(DeviceError::InternalError);
   }
 
-  ret = mbedtls_pk_parse_key(&pkey_, (const unsigned char *)CONFIG_VIG_DTLS_KEY_PEM,
-                             strlen(CONFIG_VIG_DTLS_KEY_PEM) + 1, NULL, 0);
+  std::string key_pem = unescape_pem(CONFIG_VIG_DTLS_KEY_PEM);
+  ret = mbedtls_pk_parse_key(&pkey_, (const unsigned char *)key_pem.c_str(),
+                             key_pem.length() + 1, NULL, 0);
   if (ret != 0) {
     ESP_LOGE(TAG, "Failed to parse EC private key: -0x%04X", -ret);
     return std::unexpected(DeviceError::InternalError);
   }
 
-  ret = mbedtls_ssl_config_defaults(&ssl_conf_, MBEDTLS_SSL_IS_CLIENT,
+  return {};
+}
+
+Expected<void> WhipPublisher::configure_dtls_session() {
+  int ret;
+
+  mbedtls_ssl_config_init(&ssl_conf_);
+  mbedtls_ssl_init(&ssl_ctx_);
+
+  int dtls_endpoint = dtls_role_is_server_ ? MBEDTLS_SSL_IS_SERVER : MBEDTLS_SSL_IS_CLIENT;
+  ESP_LOGI(TAG, "Configuring DTLS as %s", dtls_role_is_server_ ? "SERVER" : "CLIENT");
+  ret = mbedtls_ssl_config_defaults(&ssl_conf_, dtls_endpoint,
                                     MBEDTLS_SSL_TRANSPORT_DATAGRAM,
                                     MBEDTLS_SSL_PRESET_DEFAULT);
   if (ret != 0)
     return std::unexpected(DeviceError::InternalError);
+
+  // mbedtls_debug_set_threshold(1);
+  // mbedtls_ssl_conf_dbg(&ssl_conf_, mbedtls_debug_cb, NULL);
 
   ret = mbedtls_ssl_conf_own_cert(&ssl_conf_, &cert_, &pkey_);
   if (ret != 0) {
@@ -500,6 +660,16 @@ Expected<void> WhipPublisher::generate_dtls_cert() {
   }
 
   mbedtls_ssl_conf_authmode(&ssl_conf_, MBEDTLS_SSL_VERIFY_NONE);
+
+  // When acting as DTLS server, disable HelloVerifyRequest cookie.
+  // ICE has already verified the peer's address, and WebRTC clients
+  // don't expect a HelloVerifyRequest round-trip.
+  if (dtls_role_is_server_) {
+    mbedtls_ssl_conf_dtls_cookies(&ssl_conf_, NULL, NULL, NULL);
+  }
+
+  // Cap DTLS retransmission timeouts: min 2s, max 4s (default is 1s/60s which totals ~280s)
+  mbedtls_ssl_conf_handshake_timeout(&ssl_conf_, 2000, 4000);
 
   static mbedtls_ssl_srtp_profile srtp_profiles[] = {
       MBEDTLS_TLS_SRTP_AES128_CM_HMAC_SHA1_80, MBEDTLS_TLS_SRTP_UNSET};
@@ -515,6 +685,11 @@ Expected<void> WhipPublisher::generate_dtls_cert() {
     ESP_LOGE(TAG, "Failed to setup SSL context: -0x%04X", -ret);
     return std::unexpected(DeviceError::InternalError);
   }
+
+  // DTLS mandates a retransmission timer for handshake flight retransmits over UDP
+  mbedtls_ssl_set_timer_cb(&ssl_ctx_, &timer_ctx_,
+                           WhipPublisher::dtls_timing_set_delay,
+                           WhipPublisher::dtls_timing_get_delay);
 
   dtls_keys_.keys_exported = false;
   mbedtls_ssl_set_export_keys_cb(&ssl_ctx_, srtp_export_keys_cb, &dtls_keys_);
@@ -537,7 +712,7 @@ void WhipPublisher::generate_ice_credentials() {
 }
 
 std::string WhipPublisher::cert_fingerprint_sha256() {
-  if (!dtls_initialized_)
+  if (cert_.raw.p == nullptr || cert_.raw.len == 0)
     return "";
 
   uint8_t hash[32];
@@ -664,31 +839,145 @@ Expected<void> WhipPublisher::do_ice_binding() {
 
 int WhipPublisher::dtls_send(void *ctx, const unsigned char *buf, size_t len) {
   WhipPublisher *self = static_cast<WhipPublisher *>(ctx);
+  ESP_LOGI("VigWhip", "dtls_send: sending %zu bytes (content_type=0x%02X)", len, len > 0 ? buf[0] : 0);
   int sent = send(self->udp_socket_, buf, len, 0);
   if (sent < 0) {
+    ESP_LOGE("VigWhip", "dtls_send: send() failed, errno=%d", errno);
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
       return MBEDTLS_ERR_SSL_WANT_WRITE;
     }
     return MBEDTLS_ERR_NET_SEND_FAILED;
   }
+  ESP_LOGI("VigWhip", "dtls_send: sent %d bytes successfully", sent);
   return sent;
 }
 
 int WhipPublisher::dtls_recv(void *ctx, unsigned char *buf, size_t len) {
   WhipPublisher *self = static_cast<WhipPublisher *>(ctx);
-  int r = recv(self->udp_socket_, buf, len, 0);
-  if (r < 0) {
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      return MBEDTLS_ERR_SSL_WANT_READ;
+
+  if (self->rx_buffer_.empty() || self->rx_offset_ >= self->rx_buffer_.size()) {
+    self->rx_buffer_.clear();
+    self->rx_offset_ = 0;
+
+    uint8_t staging[2048];
+    while (true) {
+      int r = recv(self->udp_socket_, staging, sizeof(staging), 0);
+      if (r < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+          return MBEDTLS_ERR_SSL_WANT_READ;
+        }
+        ESP_LOGE("VigWhip", "dtls_recv socket error: errno=%d", errno);
+        return MBEDTLS_ERR_NET_RECV_FAILED;
+      }
+      if (r == 0) {
+        return 0;
+      }
+
+      // Check if it is a STUN packet (first byte 0x00 or 0x01)
+      if (staging[0] == 0x00 || staging[0] == 0x01) {
+        ESP_LOGI("VigWhip", "dtls_recv: Got STUN packet of %d bytes", r);
+        if (r >= 20 && staging[0] == 0x00 && staging[1] == 0x01) {
+          ESP_LOGI("VigWhip", "Processing incoming STUN binding request...");
+          self->send_stun_binding_response(staging + 8);
+        }
+        continue;
+      }
+
+      // If it is a DTLS packet, first byte must be in [20, 63]
+      if (staging[0] >= 20 && staging[0] <= 63) {
+        ESP_LOGI("VigWhip", "dtls_recv: got %d DTLS bytes, first_byte=0x%02X, req_len=%zu", r, staging[0], len);
+        self->received_client_hello_ = true;
+        self->rx_buffer_.assign(staging, staging + r);
+        self->rx_offset_ = 0;
+        break;
+      }
+
+      ESP_LOGW("VigWhip", "dtls_recv: ignoring non-DTLS packet of %d bytes, first_byte=0x%02X", r, staging[0]);
     }
-    return MBEDTLS_ERR_NET_RECV_FAILED;
   }
-  return r;
+
+  size_t available = self->rx_buffer_.size() - self->rx_offset_;
+  size_t to_copy = std::min(len, available);
+  std::memcpy(buf, self->rx_buffer_.data() + self->rx_offset_, to_copy);
+  self->rx_offset_ += to_copy;
+
+  if (self->rx_offset_ >= self->rx_buffer_.size()) {
+    self->rx_buffer_.clear();
+    self->rx_offset_ = 0;
+  }
+
+  return to_copy;
+}
+
+void WhipPublisher::send_stun_binding_response(const uint8_t *tid) {
+  std::vector<uint8_t> stun;
+
+  // 1. Header: Type=0x0101 (Binding Success Response), Length=0 (placeholder), Magic=0x2112A442
+  stun.push_back(0x01);
+  stun.push_back(0x01);
+  stun.push_back(0x00);
+  stun.push_back(0x00);
+  stun.push_back(0x21);
+  stun.push_back(0x12);
+  stun.push_back(0xA4);
+  stun.push_back(0x42);
+
+  // 2. Transaction ID (12 bytes)
+  for (int i = 0; i < 12; ++i) {
+    stun.push_back(tid[i]);
+  }
+
+  // 3. XOR-MAPPED-ADDRESS attribute (type 0x0020)
+  uint8_t xor_mapped[8];
+  xor_mapped[0] = 0x00; // Reserved
+  xor_mapped[1] = 0x01; // IPv4 Family
+  
+  xor_mapped[2] = (remote_port_ >> 8) ^ 0x21;
+  xor_mapped[3] = (remote_port_ & 0xFF) ^ 0x12;
+
+  uint32_t ip_val = 0;
+  inet_pton(AF_INET, remote_ip_.c_str(), &ip_val);
+  uint8_t *ip_bytes = reinterpret_cast<uint8_t*>(&ip_val);
+  xor_mapped[4] = ip_bytes[0] ^ 0x21;
+  xor_mapped[5] = ip_bytes[1] ^ 0x12;
+  xor_mapped[6] = ip_bytes[2] ^ 0xA4;
+  xor_mapped[7] = ip_bytes[3] ^ 0x42;
+
+  append_stun_attr(stun, 0x0020, xor_mapped, 8);
+
+  // 4. MESSAGE-INTEGRITY attribute (type 0x0008)
+  uint16_t stun_len = stun.size() - 20;
+  uint16_t total_attr_len = stun_len + 24; // Message-Integrity takes 24 bytes (4 header + 20 SHA1)
+  stun[2] = (total_attr_len >> 8) & 0xFF;
+  stun[3] = total_attr_len & 0xFF;
+
+  uint8_t hmac[20];
+  size_t hmac_len = 0;
+  psa_hmac_sha1((const uint8_t *)local_pwd_.data(), local_pwd_.length(), stun.data(),
+                stun.size(), hmac, sizeof(hmac), &hmac_len);
+
+  append_stun_attr(stun, 0x0008, hmac, 20);
+
+  // 5. FINGERPRINT attribute (type 0x8028)
+  total_attr_len += 8; // Fingerprint is 8 bytes (4 header + 4 CRC32)
+  stun[2] = (total_attr_len >> 8) & 0xFF;
+  stun[3] = total_attr_len & 0xFF;
+
+  uint32_t fp = crc32(stun.data(), stun.size()) ^ 0x5354554E;
+  fp = htonl(fp);
+  append_stun_attr(stun, 0x8028, (const uint8_t *)&fp, 4);
+
+  ESP_LOGI("VigWhip", "Sending STUN success response to %s:%d", remote_ip_.c_str(), remote_port_);
+  send(udp_socket_, stun.data(), stun.size(), 0);
 }
 
 int WhipPublisher::dtls_recv_timeout(void *ctx, unsigned char *buf, size_t len,
                                      uint32_t timeout) {
   WhipPublisher *self = static_cast<WhipPublisher *>(ctx);
+
+  if (!self->rx_buffer_.empty()) {
+    return dtls_recv(ctx, buf, len);
+  }
 
   fd_set read_fds;
   FD_ZERO(&read_fds);
@@ -700,10 +989,39 @@ int WhipPublisher::dtls_recv_timeout(void *ctx, unsigned char *buf, size_t len,
 
   int ret = select(self->udp_socket_ + 1, &read_fds, NULL, NULL, &tv);
   if (ret <= 0) {
+    if (!self->received_client_hello_) {
+      return MBEDTLS_ERR_SSL_WANT_READ;
+    }
     return MBEDTLS_ERR_SSL_TIMEOUT;
   }
 
   return dtls_recv(ctx, buf, len);
+}
+
+void WhipPublisher::dtls_timing_set_delay(void *data, uint32_t int_ms, uint32_t fin_ms) {
+  DtlsTimer *timer = static_cast<DtlsTimer *>(data);
+  timer->int_ms = int_ms;
+  timer->fin_ms = fin_ms;
+  if (fin_ms == 0) {
+    timer->start_time_us = 0;
+    return;
+  }
+  timer->start_time_us = esp_timer_get_time();
+}
+
+int WhipPublisher::dtls_timing_get_delay(void *data) {
+  DtlsTimer *timer = static_cast<DtlsTimer *>(data);
+  if (timer->fin_ms == 0) {
+    return -1;
+  }
+  int64_t elapsed_ms = (esp_timer_get_time() - timer->start_time_us) / 1000;
+  if (elapsed_ms >= timer->fin_ms) {
+    return 2;
+  }
+  if (elapsed_ms >= timer->int_ms) {
+    return 1;
+  }
+  return 0;
 }
 
 void WhipPublisher::srtp_export_keys_cb(void *p_expkey,
@@ -742,10 +1060,21 @@ Expected<void> WhipPublisher::setup_srtp() {
     return std::unexpected(DeviceError::InternalError);
   }
 
+  // RFC 5764 Section 4.2 keying material layout:
+  //   client_write_SRTP_master_key  [16 bytes] offset 0
+  //   server_write_SRTP_master_key  [16 bytes] offset 16
+  //   client_write_SRTP_master_salt [14 bytes] offset 32
+  //   server_write_SRTP_master_salt [14 bytes] offset 46
+  // Use server_write keys when we are the DTLS server, client_write otherwise.
   uint8_t master_key[16];
   uint8_t master_salt[14];
-  std::memcpy(master_key, keying_material, 16);
-  std::memcpy(master_salt, keying_material + 32, 14);
+  if (dtls_role_is_server_) {
+    std::memcpy(master_key, keying_material + 16, 16);
+    std::memcpy(master_salt, keying_material + 46, 14);
+  } else {
+    std::memcpy(master_key, keying_material, 16);
+    std::memcpy(master_salt, keying_material + 32, 14);
+  }
 
   srtp_kdf(master_key, master_salt, 0x00, srtp_send_.key, 16);
   srtp_kdf(master_key, master_salt, 0x02, srtp_send_.salt, 14);

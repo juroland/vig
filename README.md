@@ -20,3 +20,37 @@ make build
 
 # 3. Flash to the device and open the serial monitor
 make flash monitor PORT=/dev/ttyUSB0
+```
+
+---
+
+## Device Provisioning & Configuration
+
+VIG requires specific environment configurations and cryptographic credentials to publish secure live video via WebRTC (WHIP). 
+
+For in-depth educational explanations, protocol flow charts, and cryptographic analyses (including why UDP/DTLS dictate this design, public key structures, and trust-anchors), consult the **[VIG Technical & Cryptographic Protocol Handbook](file:///home/juroland/Repositories/juroland/vig/HANDBOOK.md)**.
+
+### Configuration Parameters Overview
+
+1. **`CONFIG_VIG_DEVICE_TOKEN` (Device Authentication)**:
+   The unique long-lived static bearer token configured on the device. It authenticates control plane HTTPS signaling/heartbeats (e.g. `Bearer <TOKEN>`) to dynamically obtain single-use session tokens from the backend.
+2. **`CONFIG_VIG_WHIP_URL` (WHIP Endpoint Override)**:
+   An optional static override for the WebRTC destination. If left empty, the device dynamically resolves the destination from the backend response. If set, the device streams directly to this statically defined URL.
+3. **`CONFIG_VIG_DTLS_CERT_PEM` & `CONFIG_VIG_DTLS_KEY_PEM` (Stream Encryption)**:
+   The device-specific self-signed certificate and ECDSA private key. These secure the P2P UDP video stream via **DTLS-SRTP** on-the-fly, utilizing SDP fingerprint matching without backend database storage.
+
+---
+
+### Generating Unique Device Keys
+
+We provide an automated helper to generate a unique cryptographically secure `secp256r1` (prime256v1) elliptic curve private key and self-signed certificate, format them correctly, and inject them into a specific device defaults profile:
+
+```bash
+# Generate and inject unique keys for a specific device profile (e.g. configs/jr.defaults)
+make generate-keys DEVICE=jr
+
+# Then build the firmware for that specific device
+make build DEVICE=jr
+```
+
+This updates the respective `<device_name>.defaults` file with the custom `CONFIG_VIG_DTLS_CERT_PEM` and `CONFIG_VIG_DTLS_KEY_PEM` configuration options, completely overriding the insecure shared fallbacks.

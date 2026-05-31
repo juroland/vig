@@ -211,10 +211,8 @@ Expected<void> NetworkManager::init_wifi(const std::string &ssid,
       IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, this, nullptr));
 
   wifi_config_t wifi_config = {};
-  size_t ssid_len =
-      std::min(ssid.length(), sizeof(wifi_config.sta.ssid) - 1);
-  size_t pass_len =
-      std::min(password.length(), sizeof(wifi_config.sta.password) - 1);
+  size_t ssid_len = std::min(ssid.length(), sizeof(wifi_config.sta.ssid) - 1);
+  size_t pass_len = std::min(password.length(), sizeof(wifi_config.sta.password) - 1);
   memcpy(wifi_config.sta.ssid, ssid.c_str(), ssid_len);
   memcpy(wifi_config.sta.password, password.c_str(), pass_len);
   wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;

@@ -299,8 +299,9 @@ private:
         ESP_LOGE(TAG, "Encode failed: %.*s", (int)to_string(encoded_res.error()).size(),
                  to_string(encoded_res.error()).data());
       } else {
-        // Save the latest raw frame for telemetry snapshots safely
-        {
+        // Save the latest raw frame for telemetry snapshots (once per second is
+        // sufficient)
+        if (frame_idx % 30 == 0) {
           std::lock_guard<std::mutex> lock(latest_frame_mutex_);
           latest_frame_.width = frame_res->width;
           latest_frame_.height = frame_res->height;
@@ -308,15 +309,19 @@ private:
           has_latest_frame_ = true;
         }
 
-        stream_server_.push_frame(encoded_res.value());
+        // Create shared_ptr once (move the encoded data - zero copy after this)
+        auto shared_frame =
+            std::make_shared<camera::EncodedFrame>(std::move(encoded_res.value()));
 
-        // Stream to the WHIP endpoint if active (non-blocking to avoid WDT during handshake)
+        // Stream to the WHIP endpoint first (UDP, fast fire-and-forget)
         if (whip_mutex_.try_lock()) {
           if (whip_publisher_) {
-            whip_publisher_->push_frame(encoded_res.value());
+            whip_publisher_->push_frame(*shared_frame);
           }
           whip_mutex_.unlock();
         }
+
+        stream_server_.push_frame(shared_frame);
 
         if (++frame_idx % 100 == 0) {
           ESP_LOGI(TAG, "Processed 100 frames (Current PTS: %llu)", current_pts);

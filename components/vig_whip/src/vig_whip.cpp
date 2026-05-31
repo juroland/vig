@@ -1,11 +1,12 @@
 #include "vig_whip.hpp"
 #include "esp_crt_bundle.h"
-#include "esp_timer.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "esp_timer.h"
 #include "h264_encoder.hpp"
 #include "lwip/sockets.h"
+#include "mbedtls/debug.h"
 #include "mbedtls/error.h"
 #include "mbedtls/md.h"
 #include "mbedtls/psa_util.h"
@@ -13,7 +14,6 @@
 #include "mbedtls/x509_crt.h"
 #include "psa/crypto.h"
 #include "sdkconfig.h"
-#include "mbedtls/debug.h"
 #include <algorithm>
 #include <arpa/inet.h>
 #include <cstring>
@@ -23,7 +23,8 @@
 static const char *TAG = "VigWhip";
 
 // static debug callback for mbedTLS
-static void mbedtls_debug_cb(void *ctx, int level, const char *file, int line, const char *str) {
+static void mbedtls_debug_cb(void *ctx, int level, const char *file, int line,
+                             const char *str) {
   std::string s(str);
   while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) {
     s.pop_back();
@@ -134,13 +135,15 @@ static std::string unescape_pem(const std::string &input) {
   std::string output;
   output.reserve(input.length());
   for (size_t i = 0; i < input.length(); ++i) {
-    if (i + 2 < input.length() && input[i] == '\\' && input[i + 1] == '\\' && input[i + 2] == 'n') {
+    if (i + 2 < input.length() && input[i] == '\\' && input[i + 1] == '\\' &&
+        input[i + 2] == 'n') {
       output += '\n';
       i += 2;
     } else if (i + 1 < input.length() && input[i] == '\\' && input[i + 1] == 'n') {
       output += '\n';
       i++;
-    } else if (i + 2 < input.length() && input[i] == '\\' && input[i + 1] == '\\' && input[i + 2] == 'r') {
+    } else if (i + 2 < input.length() && input[i] == '\\' && input[i + 1] == '\\' &&
+               input[i + 2] == 'r') {
       output += '\r';
       i += 2;
     } else if (i + 1 < input.length() && input[i] == '\\' && input[i + 1] == 'r') {
@@ -154,12 +157,16 @@ static std::string unescape_pem(const std::string &input) {
 }
 
 static bool is_private_ip(const std::string &ip) {
-  if (ip.empty()) return true;
-  if (ip == "127.0.0.1" || ip == "0.0.0.0" || ip == "localhost") return true;
-  
-  if (ip.rfind("10.", 0) == 0) return true;
-  if (ip.rfind("192.168.", 0) == 0) return true;
-  
+  if (ip.empty())
+    return true;
+  if (ip == "127.0.0.1" || ip == "0.0.0.0" || ip == "localhost")
+    return true;
+
+  if (ip.rfind("10.", 0) == 0)
+    return true;
+  if (ip.rfind("192.168.", 0) == 0)
+    return true;
+
   if (ip.rfind("172.", 0) == 0) {
     size_t dot = ip.find('.', 4);
     if (dot != std::string::npos) {
@@ -304,9 +311,11 @@ Expected<void> WhipPublisher::start() {
     int drained = 0;
     while (true) {
       int r = recv(udp_socket_, drain_buf, sizeof(drain_buf), MSG_DONTWAIT);
-      if (r <= 0) break;
+      if (r <= 0)
+        break;
       drained++;
-      ESP_LOGD(TAG, "Drained stale packet %d: %d bytes, first byte=0x%02X", drained, r, drain_buf[0]);
+      ESP_LOGD(TAG, "Drained stale packet %d: %d bytes, first byte=0x%02X", drained, r,
+               drain_buf[0]);
     }
     if (drained > 0) {
       ESP_LOGI(TAG, "Drained %d stale packets from socket before DTLS", drained);
@@ -348,6 +357,17 @@ Expected<void> WhipPublisher::start() {
 }
 
 void WhipPublisher::stop() {
+  if (srtp_send_.initialized) {
+    if (srtp_send_.cipher_key_id != 0) {
+      psa_destroy_key(srtp_send_.cipher_key_id);
+      srtp_send_.cipher_key_id = 0;
+    }
+    if (srtp_send_.auth_key_id != 0) {
+      psa_destroy_key(srtp_send_.auth_key_id);
+      srtp_send_.auth_key_id = 0;
+    }
+    srtp_send_.initialized = false;
+  }
   if (dtls_initialized_) {
     mbedtls_ssl_free(&ssl_ctx_);
     mbedtls_ssl_config_free(&ssl_conf_);
@@ -359,7 +379,6 @@ void WhipPublisher::stop() {
     close(udp_socket_);
     udp_socket_ = -1;
   }
-  srtp_send_.initialized = false;
 }
 
 Expected<std::string> WhipPublisher::negotiate_sdp(const std::string &local_sdp) {
@@ -477,33 +496,40 @@ Expected<void> WhipPublisher::parse_sdp_answer(const std::string &answer) {
       }
     } else if (line.rfind("a=setup:", 0) == 0) {
       std::string setup_role = line.substr(8);
-      // If the remote peer is "active", it will initiate DTLS, so we must be the server.
-      // If the remote peer is "passive", we must initiate DTLS as the client.
+      // If the remote peer is "active", it will initiate DTLS, so we must be the
+      // server. If the remote peer is "passive", we must initiate DTLS as the client.
       dtls_role_is_server_ = (setup_role == "active");
       ESP_LOGI(TAG, "Remote SDP setup role: '%s' -> local DTLS role: %s",
                setup_role.c_str(), dtls_role_is_server_ ? "SERVER" : "CLIENT");
     }
   }
 
-  // Fallback to extraction from WHIP URL host if candidate IP was local loopback or not present
+  // Fallback to extraction from WHIP URL host if candidate IP was local loopback or not
+  // present
   if (remote_ip_.empty() || remote_ip_ == "127.0.0.1" || remote_ip_ == "0.0.0.0") {
     remote_ip_ = extract_host_from_url(whip_url_);
   }
 
-  // Translate private container/NAT candidates to public-facing load balancer/signaling host if necessary
+  // Translate private container/NAT candidates to public-facing load balancer/signaling
+  // host if necessary
   std::string signaling_host = extract_host_from_url(whip_url_);
   if (is_private_ip(remote_ip_) && !is_private_ip(signaling_host)) {
-    ESP_LOGI(TAG, "Parsed remote candidate IP '%s' is a private IP. Translating to signaling host '%s'...",
+    ESP_LOGI(TAG,
+             "Parsed remote candidate IP '%s' is a private IP. Translating to "
+             "signaling host '%s'...",
              remote_ip_.c_str(), signaling_host.c_str());
     std::string resolved = resolve_hostname(signaling_host);
     if (!resolved.empty() && !is_private_ip(resolved)) {
-      ESP_LOGI(TAG, "Successfully resolved '%s' to public IP '%s'", signaling_host.c_str(), resolved.c_str());
+      ESP_LOGI(TAG, "Successfully resolved '%s' to public IP '%s'",
+               signaling_host.c_str(), resolved.c_str());
       remote_ip_ = resolved;
     }
   }
 
-  // If remote_ip_ is still a domain name, resolve it to an IP address so inet_pton works
-  if (!remote_ip_.empty() && !isdigit(remote_ip_[0]) && remote_ip_.find(':') == std::string::npos) {
+  // If remote_ip_ is still a domain name, resolve it to an IP address so inet_pton
+  // works
+  if (!remote_ip_.empty() && !isdigit(remote_ip_[0]) &&
+      remote_ip_.find(':') == std::string::npos) {
     ESP_LOGI(TAG, "Resolving host '%s' to IP address...", remote_ip_.c_str());
     std::string resolved = resolve_hostname(remote_ip_);
     if (!resolved.empty()) {
@@ -546,6 +572,7 @@ void WhipPublisher::push_frame(const vig::camera::EncodedFrame &frame) {
     payload_size--;
 
     bool first = true;
+    uint8_t fua_buf[MAX_PAYLOAD];
     while (payload_size > 0) {
       size_t chunk_size = std::min(payload_size, MAX_PAYLOAD - 2);
       bool last = (chunk_size == payload_size);
@@ -559,12 +586,11 @@ void WhipPublisher::push_frame(const vig::camera::EncodedFrame &frame) {
         fu_header_mod |= 0x40; // End bit
       }
 
-      std::vector<uint8_t> packet;
-      packet.push_back(fu_indicator);
-      packet.push_back(fu_header_mod);
-      packet.insert(packet.end(), nal_data, nal_data + chunk_size);
+      fua_buf[0] = fu_indicator;
+      fua_buf[1] = fu_header_mod;
+      memcpy(fua_buf + 2, nal_data, chunk_size);
 
-      send_rtp_packet(packet.data(), packet.size(), rtp_ts, last);
+      send_rtp_packet(fua_buf, chunk_size + 2, rtp_ts, last);
 
       nal_data += chunk_size;
       payload_size -= chunk_size;
@@ -581,9 +607,8 @@ void WhipPublisher::send_rtp_packet(const uint8_t *payload, size_t size,
     ssrc_ = 0x12345678;
   }
 
-  // Allocate buffer for RTP header (12 bytes) + payload + SRTP Authentication Tag (10
-  // bytes)
-  std::vector<uint8_t> packet(12 + size + 10);
+  // Stack buffer for RTP header (12) + payload (max 1400) + SRTP auth tag (10)
+  uint8_t packet[12 + 1400 + 10];
   packet[0] = 0x80;
   packet[1] = (marker ? 0x80 : 0x00) | 96; // PT=96 (dynamic H264 payload type)
   packet[2] = (seq_num_ >> 8) & 0xFF;
@@ -597,11 +622,11 @@ void WhipPublisher::send_rtp_packet(const uint8_t *payload, size_t size,
   packet[10] = (ssrc_ >> 8) & 0xFF;
   packet[11] = ssrc_ & 0xFF;
 
-  memcpy(packet.data() + 12, payload, size);
+  memcpy(packet + 12, payload, size);
 
   size_t out_len = 0;
-  if (srtp_protect(packet.data(), 12 + size, &out_len)) {
-    send(udp_socket_, packet.data(), out_len, 0);
+  if (srtp_protect(packet, 12 + size, &out_len)) {
+    send(udp_socket_, packet, out_len, 0);
   }
   seq_num_++;
 }
@@ -642,7 +667,8 @@ Expected<void> WhipPublisher::configure_dtls_session() {
   mbedtls_ssl_config_init(&ssl_conf_);
   mbedtls_ssl_init(&ssl_ctx_);
 
-  int dtls_endpoint = dtls_role_is_server_ ? MBEDTLS_SSL_IS_SERVER : MBEDTLS_SSL_IS_CLIENT;
+  int dtls_endpoint =
+      dtls_role_is_server_ ? MBEDTLS_SSL_IS_SERVER : MBEDTLS_SSL_IS_CLIENT;
   ESP_LOGI(TAG, "Configuring DTLS as %s", dtls_role_is_server_ ? "SERVER" : "CLIENT");
   ret = mbedtls_ssl_config_defaults(&ssl_conf_, dtls_endpoint,
                                     MBEDTLS_SSL_TRANSPORT_DATAGRAM,
@@ -668,7 +694,8 @@ Expected<void> WhipPublisher::configure_dtls_session() {
     mbedtls_ssl_conf_dtls_cookies(&ssl_conf_, NULL, NULL, NULL);
   }
 
-  // Cap DTLS retransmission timeouts: min 2s, max 4s (default is 1s/60s which totals ~280s)
+  // Cap DTLS retransmission timeouts: min 2s, max 4s (default is 1s/60s which totals
+  // ~280s)
   mbedtls_ssl_conf_handshake_timeout(&ssl_conf_, 2000, 4000);
 
   static mbedtls_ssl_srtp_profile srtp_profiles[] = {
@@ -687,8 +714,7 @@ Expected<void> WhipPublisher::configure_dtls_session() {
   }
 
   // DTLS mandates a retransmission timer for handshake flight retransmits over UDP
-  mbedtls_ssl_set_timer_cb(&ssl_ctx_, &timer_ctx_,
-                           WhipPublisher::dtls_timing_set_delay,
+  mbedtls_ssl_set_timer_cb(&ssl_ctx_, &timer_ctx_, WhipPublisher::dtls_timing_set_delay,
                            WhipPublisher::dtls_timing_get_delay);
 
   dtls_keys_.keys_exported = false;
@@ -839,7 +865,8 @@ Expected<void> WhipPublisher::do_ice_binding() {
 
 int WhipPublisher::dtls_send(void *ctx, const unsigned char *buf, size_t len) {
   WhipPublisher *self = static_cast<WhipPublisher *>(ctx);
-  ESP_LOGI("VigWhip", "dtls_send: sending %zu bytes (content_type=0x%02X)", len, len > 0 ? buf[0] : 0);
+  ESP_LOGI("VigWhip", "dtls_send: sending %zu bytes (content_type=0x%02X)", len,
+           len > 0 ? buf[0] : 0);
   int sent = send(self->udp_socket_, buf, len, 0);
   if (sent < 0) {
     ESP_LOGE("VigWhip", "dtls_send: send() failed, errno=%d", errno);
@@ -885,14 +912,18 @@ int WhipPublisher::dtls_recv(void *ctx, unsigned char *buf, size_t len) {
 
       // If it is a DTLS packet, first byte must be in [20, 63]
       if (staging[0] >= 20 && staging[0] <= 63) {
-        ESP_LOGI("VigWhip", "dtls_recv: got %d DTLS bytes, first_byte=0x%02X, req_len=%zu", r, staging[0], len);
+        ESP_LOGI("VigWhip",
+                 "dtls_recv: got %d DTLS bytes, first_byte=0x%02X, req_len=%zu", r,
+                 staging[0], len);
         self->received_client_hello_ = true;
         self->rx_buffer_.assign(staging, staging + r);
         self->rx_offset_ = 0;
         break;
       }
 
-      ESP_LOGW("VigWhip", "dtls_recv: ignoring non-DTLS packet of %d bytes, first_byte=0x%02X", r, staging[0]);
+      ESP_LOGW("VigWhip",
+               "dtls_recv: ignoring non-DTLS packet of %d bytes, first_byte=0x%02X", r,
+               staging[0]);
     }
   }
 
@@ -912,7 +943,8 @@ int WhipPublisher::dtls_recv(void *ctx, unsigned char *buf, size_t len) {
 void WhipPublisher::send_stun_binding_response(const uint8_t *tid) {
   std::vector<uint8_t> stun;
 
-  // 1. Header: Type=0x0101 (Binding Success Response), Length=0 (placeholder), Magic=0x2112A442
+  // 1. Header: Type=0x0101 (Binding Success Response), Length=0 (placeholder),
+  // Magic=0x2112A442
   stun.push_back(0x01);
   stun.push_back(0x01);
   stun.push_back(0x00);
@@ -931,13 +963,13 @@ void WhipPublisher::send_stun_binding_response(const uint8_t *tid) {
   uint8_t xor_mapped[8];
   xor_mapped[0] = 0x00; // Reserved
   xor_mapped[1] = 0x01; // IPv4 Family
-  
+
   xor_mapped[2] = (remote_port_ >> 8) ^ 0x21;
   xor_mapped[3] = (remote_port_ & 0xFF) ^ 0x12;
 
   uint32_t ip_val = 0;
   inet_pton(AF_INET, remote_ip_.c_str(), &ip_val);
-  uint8_t *ip_bytes = reinterpret_cast<uint8_t*>(&ip_val);
+  uint8_t *ip_bytes = reinterpret_cast<uint8_t *>(&ip_val);
   xor_mapped[4] = ip_bytes[0] ^ 0x21;
   xor_mapped[5] = ip_bytes[1] ^ 0x12;
   xor_mapped[6] = ip_bytes[2] ^ 0xA4;
@@ -947,7 +979,8 @@ void WhipPublisher::send_stun_binding_response(const uint8_t *tid) {
 
   // 4. MESSAGE-INTEGRITY attribute (type 0x0008)
   uint16_t stun_len = stun.size() - 20;
-  uint16_t total_attr_len = stun_len + 24; // Message-Integrity takes 24 bytes (4 header + 20 SHA1)
+  uint16_t total_attr_len =
+      stun_len + 24; // Message-Integrity takes 24 bytes (4 header + 20 SHA1)
   stun[2] = (total_attr_len >> 8) & 0xFF;
   stun[3] = total_attr_len & 0xFF;
 
@@ -967,7 +1000,8 @@ void WhipPublisher::send_stun_binding_response(const uint8_t *tid) {
   fp = htonl(fp);
   append_stun_attr(stun, 0x8028, (const uint8_t *)&fp, 4);
 
-  ESP_LOGI("VigWhip", "Sending STUN success response to %s:%d", remote_ip_.c_str(), remote_port_);
+  ESP_LOGI("VigWhip", "Sending STUN success response to %s:%d", remote_ip_.c_str(),
+           remote_port_);
   send(udp_socket_, stun.data(), stun.size(), 0);
 }
 
@@ -998,7 +1032,8 @@ int WhipPublisher::dtls_recv_timeout(void *ctx, unsigned char *buf, size_t len,
   return dtls_recv(ctx, buf, len);
 }
 
-void WhipPublisher::dtls_timing_set_delay(void *data, uint32_t int_ms, uint32_t fin_ms) {
+void WhipPublisher::dtls_timing_set_delay(void *data, uint32_t int_ms,
+                                          uint32_t fin_ms) {
   DtlsTimer *timer = static_cast<DtlsTimer *>(data);
   timer->int_ms = int_ms;
   timer->fin_ms = fin_ms;
@@ -1080,6 +1115,35 @@ Expected<void> WhipPublisher::setup_srtp() {
   srtp_kdf(master_key, master_salt, 0x02, srtp_send_.salt, 14);
   srtp_kdf(master_key, master_salt, 0x01, srtp_send_.auth_key, 20);
 
+  // Pre-import the AES cipher key into PSA once (avoid per-packet import/destroy)
+  {
+    psa_key_attributes_t attr = PSA_KEY_ATTRIBUTES_INIT;
+    psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_ENCRYPT);
+    psa_set_key_algorithm(&attr, PSA_ALG_CTR);
+    psa_set_key_type(&attr, PSA_KEY_TYPE_AES);
+    psa_set_key_bits(&attr, 128);
+    psa_status_t st =
+        psa_import_key(&attr, srtp_send_.key, 16, &srtp_send_.cipher_key_id);
+    if (st != PSA_SUCCESS) {
+      ESP_LOGE(TAG, "Failed to pre-import SRTP cipher key: %d", (int)st);
+      return std::unexpected(DeviceError::InternalError);
+    }
+  }
+
+  // Pre-import the HMAC auth key into PSA once
+  {
+    psa_key_attributes_t attr = PSA_KEY_ATTRIBUTES_INIT;
+    psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_SIGN_MESSAGE);
+    psa_set_key_algorithm(&attr, PSA_ALG_HMAC(PSA_ALG_SHA_1));
+    psa_set_key_type(&attr, PSA_KEY_TYPE_HMAC);
+    psa_status_t st =
+        psa_import_key(&attr, srtp_send_.auth_key, 20, &srtp_send_.auth_key_id);
+    if (st != PSA_SUCCESS) {
+      ESP_LOGE(TAG, "Failed to pre-import SRTP auth key: %d", (int)st);
+      return std::unexpected(DeviceError::InternalError);
+    }
+  }
+
   srtp_send_.roc = 0;
   srtp_send_.last_seq = 0;
   srtp_send_.initialized = true;
@@ -1113,24 +1177,11 @@ bool WhipPublisher::srtp_protect(uint8_t *packet, size_t rtp_len, size_t *out_le
   size_t payload_len = rtp_len - 12;
   uint8_t *payload = packet + 12;
 
-  psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
-  psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_ENCRYPT);
-  psa_set_key_algorithm(&attributes, PSA_ALG_CTR);
-  psa_set_key_type(&attributes, PSA_KEY_TYPE_AES);
-  psa_set_key_bits(&attributes, 128);
-
-  psa_key_id_t key_id = 0;
-  psa_status_t status = psa_import_key(&attributes, srtp_send_.key, 16, &key_id);
-  if (status != PSA_SUCCESS) {
-    ESP_LOGE(TAG, "Failed to import SRTP cipher key: %d", (int)status);
-    return false;
-  }
-
   psa_cipher_operation_t operation = PSA_CIPHER_OPERATION_INIT;
-  status = psa_cipher_encrypt_setup(&operation, key_id, PSA_ALG_CTR);
+  psa_status_t status =
+      psa_cipher_encrypt_setup(&operation, srtp_send_.cipher_key_id, PSA_ALG_CTR);
   if (status != PSA_SUCCESS) {
     ESP_LOGE(TAG, "Failed to setup PSA cipher: %d", (int)status);
-    psa_destroy_key(key_id);
     return false;
   }
 
@@ -1138,7 +1189,6 @@ bool WhipPublisher::srtp_protect(uint8_t *packet, size_t rtp_len, size_t *out_le
   if (status != PSA_SUCCESS) {
     ESP_LOGE(TAG, "Failed to set IV: %d", (int)status);
     psa_cipher_abort(&operation);
-    psa_destroy_key(key_id);
     return false;
   }
 
@@ -1148,7 +1198,6 @@ bool WhipPublisher::srtp_protect(uint8_t *packet, size_t rtp_len, size_t *out_le
   if (status != PSA_SUCCESS) {
     ESP_LOGE(TAG, "Failed to update cipher: %d", (int)status);
     psa_cipher_abort(&operation);
-    psa_destroy_key(key_id);
     return false;
   }
 
@@ -1158,24 +1207,28 @@ bool WhipPublisher::srtp_protect(uint8_t *packet, size_t rtp_len, size_t *out_le
   if (status != PSA_SUCCESS) {
     ESP_LOGE(TAG, "Failed to finish cipher: %d", (int)status);
     psa_cipher_abort(&operation);
-    psa_destroy_key(key_id);
     return false;
   }
 
   psa_cipher_abort(&operation);
-  psa_destroy_key(key_id);
 
-  std::vector<uint8_t> auth_buf(rtp_len + 4);
-  memcpy(auth_buf.data(), packet, rtp_len);
-  auth_buf[rtp_len] = (srtp_send_.roc >> 24) & 0xFF;
-  auth_buf[rtp_len + 1] = (srtp_send_.roc >> 16) & 0xFF;
-  auth_buf[rtp_len + 2] = (srtp_send_.roc >> 8) & 0xFF;
-  auth_buf[rtp_len + 3] = srtp_send_.roc & 0xFF;
+  // HMAC-SHA1-80 authentication using pre-imported key
+  // Max rtp_len is 12 + 1400 = 1412, so 1416 bytes suffices
+  uint8_t auth_input[1416];
+  memcpy(auth_input, packet, rtp_len);
+  auth_input[rtp_len] = (srtp_send_.roc >> 24) & 0xFF;
+  auth_input[rtp_len + 1] = (srtp_send_.roc >> 16) & 0xFF;
+  auth_input[rtp_len + 2] = (srtp_send_.roc >> 8) & 0xFF;
+  auth_input[rtp_len + 3] = srtp_send_.roc & 0xFF;
 
   uint8_t hmac[20];
   size_t hmac_len = 0;
-  psa_hmac_sha1(srtp_send_.auth_key, 20, auth_buf.data(), auth_buf.size(), hmac,
-                sizeof(hmac), &hmac_len);
+  status = psa_mac_compute(srtp_send_.auth_key_id, PSA_ALG_HMAC(PSA_ALG_SHA_1),
+                           auth_input, rtp_len + 4, hmac, sizeof(hmac), &hmac_len);
+  if (status != PSA_SUCCESS) {
+    ESP_LOGE(TAG, "SRTP HMAC compute failed: %d", (int)status);
+    return false;
+  }
 
   memcpy(packet + rtp_len, hmac, 10);
   *out_len = rtp_len + 10;

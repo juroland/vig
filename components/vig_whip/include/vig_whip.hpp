@@ -25,6 +25,9 @@ struct SrtpContext {
   uint8_t key[16];
   uint8_t salt[14];
   uint8_t auth_key[20];
+  // Persistent PSA key handles (avoid per-packet import/destroy)
+  psa_key_id_t cipher_key_id{0};
+  psa_key_id_t auth_key_id{0};
   // Rolling SRTP index for ROC computation
   uint32_t roc{0};
   uint16_t last_seq{0};

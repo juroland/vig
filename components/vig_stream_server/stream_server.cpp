@@ -155,35 +155,16 @@ esp_err_t StreamServer::ws_handler(httpd_req_t *req) {
   return ESP_OK;
 }
 
-void StreamServer::push_frame(const camera::EncodedFrame &frame) {
+void StreamServer::push_frame(const std::shared_ptr<camera::EncodedFrame> &frame) {
   if (!clients_mutex_ || !server_handle_)
     return;
 
-  // Wrap the frame in a shared_ptr once to avoid multiple copies
-  auto shared_frame = std::make_shared<camera::EncodedFrame>(frame);
-
   xSemaphoreTake(clients_mutex_, portMAX_DELAY);
-
-  if (!clients_.empty()) {
-    static uint32_t push_log_count = 0;
-    if (push_log_count++ % 50 == 0) {
-      ESP_LOGI(TAG, "push_frame active: %u connected client(s)", clients_.size());
-    }
-  }
 
   auto it = clients_.begin();
   while (it != clients_.end()) {
-    // Robustly check if the client socket is still active
-    struct sockaddr_storage addr;
-    socklen_t addr_len = sizeof(addr);
-    if (getpeername(it->fd, (struct sockaddr *)&addr, &addr_len) != 0) {
-      ESP_LOGI(TAG, "Client socket FD %d closed/dead, removing", it->fd);
-      it = clients_.erase(it);
-      continue;
-    }
-
     // Promote waiting clients if we have a keyframe
-    if (frame.is_keyframe && !it->ready) {
+    if (frame->is_keyframe && !it->ready) {
       it->ready = true;
       ESP_LOGI(TAG, "Client (FD: %d) promoted to ready (Keyframe received)", it->fd);
     }
@@ -194,7 +175,7 @@ void StreamServer::push_frame(const camera::EncodedFrame &frame) {
     }
 
     AsyncSendArg *arg = new (std::nothrow)
-        AsyncSendArg{.hd = server_handle_, .fd = it->fd, .frame = shared_frame};
+        AsyncSendArg{.hd = server_handle_, .fd = it->fd, .frame = frame};
 
     if (arg == nullptr) {
       ESP_LOGE(TAG, "OOM: failed to allocate send arg");
@@ -227,7 +208,8 @@ void StreamServer::async_send_callback(void *arg) {
   esp_err_t ret = httpd_ws_send_frame_async(send_arg->hd, send_arg->fd, &ws_pkt);
 
   if (ret != ESP_OK) {
-    ESP_LOGD(TAG, "Async send failed: %d", ret);
+    ESP_LOGD(TAG, "Async send failed for FD %d: %d, will be cleaned up", send_arg->fd,
+             ret);
   }
 
   delete send_arg;

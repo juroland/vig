@@ -253,7 +253,7 @@ static const char stream_page_html[] = R"HTML(
                     <div id="status-pulse"></div>
                     <span id="status-text">Offline</span>
                 </div>
-                <div class="badge badge-info">1920x1080 @ 30FPS</div>
+                <div class="badge badge-info">1920x1080</div>
             </div>
 
             <div class="video-wrapper">
@@ -3743,28 +3743,28 @@ this.videoStarted = false;
                 debug: false
             });
 
-            // Smooth dynamic playbackRate adjustment for ultra-low latency
+            // Smooth dynamic playbackRate adjustment for ultra-low latency (~40ms target)
             setInterval(() => {
                 if (playerNode && playerNode.buffered.length > 0) {
                     const bufferEnd = playerNode.buffered.end(playerNode.buffered.length - 1);
                     const delay = bufferEnd - playerNode.currentTime;
 
-                    if (delay > 0.35) {
+                    if (delay > 0.12) {
                         // Hard catch-up: skip directly to the newest frame
-                        playerNode.currentTime = bufferEnd - 0.02;
+                        playerNode.currentTime = bufferEnd - 0.01;
                         playerNode.playbackRate = 1.0;
-                    } else if (delay > 0.15) {
-                        // Smooth catch-up: speed up slightly to clear backlog
-                        playerNode.playbackRate = 1.25;
-                    } else if (delay < 0.06) {
+                    } else if (delay > 0.06) {
+                        // Smooth catch-up: speed up to clear backlog
+                        playerNode.playbackRate = 1.5;
+                    } else if (delay < 0.02) {
                         // Anti-starvation: slow down slightly so we don't hit the buffer wall
-                        playerNode.playbackRate = 0.95;
+                        playerNode.playbackRate = 0.9;
                     } else {
-                        // Target latency reached
+                        // Target latency reached (~40ms)
                         playerNode.playbackRate = 1.0;
                     }
                 }
-            }, 50);
+            }, 30);
         }
 
         function connect() {

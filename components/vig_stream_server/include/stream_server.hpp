@@ -26,7 +26,7 @@ public:
   Expected<void> start(int port, SnapshotCallback snapshot_cb = nullptr);
   void stop();
 
-  void push_frame(const camera::EncodedFrame &frame);
+  void push_frame(const std::shared_ptr<camera::EncodedFrame> &frame);
 
 private:
   httpd_handle_t server_handle_{nullptr};

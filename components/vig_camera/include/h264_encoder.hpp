@@ -11,7 +11,7 @@
 namespace vig::camera {
 
 struct EncodedFrame {
-  std::vector<uint8_t> data;
+  std::vector<uint8_t, vig::memory::AlignedPsramAllocator<uint8_t>> data;
   size_t pts;
   bool is_keyframe;
 };

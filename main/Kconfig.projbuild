@@ -6,12 +6,6 @@ menu "VIG Device Configuration"
         help
             The base URL for the VIG backend API.
 
-    config VIG_WHIP_URL
-        string "VIG WHIP Server URL (Optional Override)"
-        default ""
-        help
-            The WHIP endpoint URL for WebRTC video publishing. If empty, the URL returned by the backend heartbeat response will be used.
-
     config VIG_DEVICE_TOKEN
         string "VIG Device Token"
         default "default_token_change_me"

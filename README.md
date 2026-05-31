@@ -34,9 +34,7 @@ For in-depth educational explanations, protocol flow charts, and cryptographic a
 
 1. **`CONFIG_VIG_DEVICE_TOKEN` (Device Authentication)**:
    The unique long-lived static bearer token configured on the device. It authenticates control plane HTTPS signaling/heartbeats (e.g. `Bearer <TOKEN>`) to dynamically obtain single-use session tokens from the backend.
-2. **`CONFIG_VIG_WHIP_URL` (WHIP Endpoint Override)**:
-   An optional static override for the WebRTC destination. If left empty, the device dynamically resolves the destination from the backend response. If set, the device streams directly to this statically defined URL.
-3. **`CONFIG_VIG_DTLS_CERT_PEM` & `CONFIG_VIG_DTLS_KEY_PEM` (Stream Encryption)**:
+2. **`CONFIG_VIG_DTLS_CERT_PEM` & `CONFIG_VIG_DTLS_KEY_PEM` (Stream Encryption)**:
    The device-specific self-signed certificate and ECDSA private key. These secure the P2P UDP video stream via **DTLS-SRTP** on-the-fly, utilizing SDP fingerprint matching without backend database storage.
 
 ---

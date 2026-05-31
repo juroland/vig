@@ -7,7 +7,7 @@ idf_component_register(
 
     REQUIRES
     # extern components
-    esp_eth esp_common driver nvs_flash
+    esp_eth esp_common driver nvs_flash esp_wifi_remote esp_hosted
     # internal components
     vig_net
     vig_common

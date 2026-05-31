@@ -5,3 +5,8 @@ dependencies:
   espressif/esp_h264: "^1.0.0"
   espressif/esp_cam_sensor: "^2.1.0"
   espressif/esp_jpeg: "^1.0.0"
+  espressif/esp_wifi_remote: "*"
+  espressif/esp_hosted: "*"
+
+
+

@@ -237,6 +237,7 @@ Expected<void> WhipPublisher::start() {
   rx_offset_ = 0;
   timer_ctx_ = DtlsTimer{};
   received_client_hello_ = false;
+  has_error_ = false;
 
   // 1. Generate local DTLS Certificates and Private Keys using PSA Hardware Engine
   auto cert_status = generate_dtls_cert();
@@ -558,6 +559,23 @@ void WhipPublisher::push_frame(const vigo::camera::EncodedFrame &frame) {
   if (udp_socket_ < 0 || frame.data.empty() || !srtp_send_.initialized)
     return;
 
+  // Drain any incoming STUN/RTCP packets and check for connection errors
+  uint8_t dummy[256];
+  while (true) {
+    int r = recv(udp_socket_, dummy, sizeof(dummy), MSG_DONTWAIT);
+    if (r < 0) {
+      if (errno != EWOULDBLOCK && errno != EAGAIN && errno != EINTR) {
+        ESP_LOGW(TAG, "recv failed with errno=%d, marking publisher as errored", errno);
+        has_error_ = true;
+      }
+      break;
+    }
+  }
+
+  if (has_error_) {
+    return;
+  }
+
   uint32_t rtp_ts = static_cast<uint32_t>(frame.pts * 90);
   size_t payload_size = frame.data.size();
   const size_t MAX_PAYLOAD = 1400;
@@ -603,7 +621,7 @@ void WhipPublisher::push_frame(const vigo::camera::EncodedFrame &frame) {
 
 void WhipPublisher::send_rtp_packet(const uint8_t *payload, size_t size,
                                     uint32_t timestamp, bool marker) {
-  if (udp_socket_ < 0 || !srtp_send_.initialized)
+  if (udp_socket_ < 0 || !srtp_send_.initialized || has_error_)
     return;
 
   if (ssrc_ == 0) {
@@ -629,7 +647,13 @@ void WhipPublisher::send_rtp_packet(const uint8_t *payload, size_t size,
 
   size_t out_len = 0;
   if (srtp_protect(packet, 12 + size, &out_len)) {
-    send(udp_socket_, packet, out_len, 0);
+    int sent = send(udp_socket_, packet, out_len, 0);
+    if (sent < 0) {
+      if (errno != EWOULDBLOCK && errno != EAGAIN && errno != EINTR) {
+        ESP_LOGW(TAG, "send failed with errno=%d, marking publisher as errored", errno);
+        has_error_ = true;
+      }
+    }
   }
   seq_num_++;
 }

@@ -49,6 +49,9 @@ public:
   /// Encrypt frame as SRTP and transmit via UDP to the remote ICE candidate.
   void push_frame(const vigo::camera::EncodedFrame &frame);
 
+  /// Check if the publisher has encountered a connection error.
+  bool has_error() const { return has_error_; }
+
 private:
   std::string whip_url_;
   std::string stream_token_;
@@ -83,6 +86,7 @@ private:
   bool dtls_initialized_{false};
   bool dtls_role_is_server_{false}; // true if remote answered a=setup:active
   bool received_client_hello_{false};
+  bool has_error_{false};
 
   // SRTP transmit context
   SrtpContext srtp_send_;

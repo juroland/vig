@@ -253,8 +253,9 @@ private:
           std::string new_endpoint = strip_token_from_url(target_whip_url);
           std::string active_endpoint = strip_token_from_url(active_whip_url_);
 
-          if (!whip_publisher_ || new_endpoint != active_endpoint) {
-            // Endpoint changed (or not started yet): full restart
+          if (!whip_publisher_ || whip_publisher_->has_error() ||
+              new_endpoint != active_endpoint) {
+            // Endpoint changed, errored out, or not started yet: full restart
             ESP_LOGI(TAG, "Starting/restarting WHIP stream to %s (original: %s)",
                      target_whip_url.c_str(), hb.whip_url.c_str());
             if (whip_publisher_) {

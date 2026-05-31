@@ -16,7 +16,7 @@ endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
-project(vig)
+project(vigo)
 
 # Fix compatibility issue
 if(TARGET __idf_espressif__esp_ipa)

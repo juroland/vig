@@ -1,86 +1,86 @@
 menu "VIG Device Configuration"
 
-    config VIG_API_URL
+    config VIGO_API_URL
         string "VIG API Base URL"
         default "http://vig_server.local/api"
         help
             The base URL for the VIG backend API.
 
-    config VIG_DEVICE_TOKEN
+    config VIGO_DEVICE_TOKEN
         string "VIG Device Token"
         default "default_token_change_me"
         help
             The authentication token for this device.
 
-    config VIG_HARDWARE_ID
+    config VIGO_HARDWARE_ID
         string "Hardware ID"
         default "ESP32P4_CAM_001"
         help
             Unique identifier for this hardware unit.
 
-    config VIG_HEARTBEAT_INTERVAL_MS
+    config VIGO_HEARTBEAT_INTERVAL_MS
         int "Heartbeat Interval (ms)"
         default 30000
         range 1000 3600000
         help
             Time between heartbeat pulses in milliseconds.
 
-    config VIG_USE_MOCK_CAMERA
+    config VIGO_USE_MOCK_CAMERA
         bool "Use mock camera (for CI / no-hardware builds)"
         default n
 
-    config VIG_CAMERA_WIDTH
+    config VIGO_CAMERA_WIDTH
         int "Camera capture width"
         default 1280
 
-    config VIG_CAMERA_HEIGHT
+    config VIGO_CAMERA_HEIGHT
         int "Camera capture height"
-        default 720
+        default 960
 
-    config VIG_ENCODER_BITRATE_KBPS
+    config VIGO_ENCODER_BITRATE_KBPS
         int "H.264 encoder bitrate (kbps)"
         default 2000
 
-    config VIG_ENCODER_GOP
+    config VIGO_ENCODER_GOP
         int "H.264 encoder GOP size"
         default 30
 
-    config VIG_STREAM_PORT
+    config VIGO_STREAM_PORT
         int "Local stream server HTTP port"
         default 80
 
-    config VIG_STREAM_MAX_CLIENTS
+    config VIGO_STREAM_MAX_CLIENTS
         int "Max simultaneous WebSocket clients"
         default 4
 
-    config VIG_USE_WIFI
+    config VIGO_USE_WIFI
         bool "Use WiFi instead of Ethernet"
         default n
         help
             When enabled, the device connects via WiFi using the credentials below.
             When disabled (default), the device uses the wired Ethernet interface.
 
-    config VIG_WIFI_SSID
+    config VIGO_WIFI_SSID
         string "WiFi SSID"
         default ""
-        depends on VIG_USE_WIFI
+        depends on VIGO_USE_WIFI
         help
             SSID of the WiFi network to connect to.
 
-    config VIG_WIFI_PASSWORD
+    config VIGO_WIFI_PASSWORD
         string "WiFi Password"
         default ""
-        depends on VIG_USE_WIFI
+        depends on VIGO_USE_WIFI
         help
             Password for the WiFi network (WPA2-PSK).
 
-    config VIG_DTLS_CERT_PEM
+    config VIGO_DTLS_CERT_PEM
         string "DTLS Certificate PEM"
         default "-----BEGIN CERTIFICATE-----\nMIIBfDCCASOgAwIBAgIUMPEdIVBibXtMlqg1DtWXqVYXsTkwCgYIKoZIzj0EAwIw\nFDESMBAGA1UEAwwJVmlnRGV2aWNlMB4XDTI2MDUyODA3MTM0NVoXDTM2MDUyNTA3\nMTM0NVowFDESMBAGA1UEAwwJVmlnRGV2aWNlMFkwEwYHKoZIzj0CAQYIKoZIzj0D\nAQcDQgAEpp90W5as0dtNXzjHTdxiu69xYUFrUouQWw9NWLOrtlUNyD2dUb9oEe1k\neHcnEOyzfECwqpcqWSA+MrLq1BpZNqNTMFEwHQYDVR0OBBYEFAIdRjWDVAfLt9gx\nd7Xaikf9ygGaMB8GA1UdIwQYMBaAFAIdRjWDVAfLt9gxd7Xaikf9ygGaMA8GA1Ud\nEwEB/wQFMAMBAf8wCgYIKoZIzj0EAwIDRwAwRAIgEVCUMZ4pQNGU51AuHAofPvrq\naKVO6EDge9s5XqG9pQYCIDFZnKKfJX8uZGJqv8GqG75RAD2/I5ecLYmPdDAASuQr\n-----END CERTIFICATE-----\n"
         help
             The PEM-formatted DTLS client certificate for WHIP WebRTC publisher.
 
-    config VIG_DTLS_KEY_PEM
+    config VIGO_DTLS_KEY_PEM
         string "DTLS Private Key PEM"
         default "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIOnub8RAPhTvHZk8lcfCc/6wHw2l848hKqTWbEbXPj1hoAoGCCqGSM49\nAwEHoUQDQgAEpp90W5as0dtNXzjHTdxiu69xYUFrUouQWw9NWLOrtlUNyD2dUb9o\nEe1keHcnEOyzfECwqpcqWSA+MrLq1BpZNg==\n-----END EC PRIVATE KEY-----\n"
         help

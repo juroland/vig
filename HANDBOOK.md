@@ -20,7 +20,7 @@ sequenceDiagram
     D->>D: Calculate SHA-256 Fingerprint of Cert on-the-fly
 
     Note over D, API: Step 2: Telemetry Heartbeat (HTTPS Control Plane)
-    D->>API: POST /api/devices/heartbeat<br/>Header: Authorization: Bearer <CONFIG_VIG_DEVICE_TOKEN>
+    D->>API: POST /api/devices/heartbeat<br/>Header: Authorization: Bearer <CONFIG_VIGO_DEVICE_TOKEN>
     Note over API: Authenticates token,<br/>registers telemetry (Heap, CPU Temp)
     API-->>D: HTTP 200 OK (whip_url, short-lived stream_token)
 
@@ -50,16 +50,16 @@ sequenceDiagram
 
 ---
 
-## 1. Device Authentication: `CONFIG_VIG_DEVICE_TOKEN`
+## 1. Device Authentication: `CONFIG_VIGO_DEVICE_TOKEN`
 
-The `CONFIG_VIG_DEVICE_TOKEN` is a unique long-lived static bearer token configured on the device during provisioning. It represents the root of trust between the hardware unit and the backend:
+The `CONFIG_VIGO_DEVICE_TOKEN` is a unique long-lived static bearer token configured on the device during provisioning. It represents the root of trust between the hardware unit and the backend:
 
-- **Control Plane Authentication:** On boot and periodically, the device sends HTTP POST heartbeats to the central API server (e.g., `https://api.link.roland-industries.com/api/devices/heartbeat`). To authenticate this request, the device attaches the header `Authorization: Bearer <CONFIG_VIG_DEVICE_TOKEN>`.
+- **Control Plane Authentication:** On boot and periodically, the device sends HTTP POST heartbeats to the central API server (e.g., `https://api.link.roland-industries.com/api/devices/heartbeat`). To authenticate this request, the device attaches the header `Authorization: Bearer <CONFIG_VIGO_DEVICE_TOKEN>`.
 - **Dynamic Stream Authorization:** The backend verifies this token, registers the device telemetry (Heap, Uptime, CPU Temp), and responds with a short-lived, single-use `stream_token` and the target WebRTC `whip_url`. The device then uses this short-lived session token to authenticate its media publish request to the WHIP gateway.
 
 ---
 
-## 2. Stream Encryption: `CONFIG_VIG_DTLS_CERT_PEM` & `CONFIG_VIG_DTLS_KEY_PEM`
+## 2. Stream Encryption: `CONFIG_VIGO_DTLS_CERT_PEM` & `CONFIG_VIGO_DTLS_KEY_PEM`
 
 By default, the firmware includes a fallback keypair in its global Kconfig schema. However, **every production or development device MUST be provisioned with its own unique keypair** for the following critical security reasons:
 
@@ -83,27 +83,27 @@ Here is how the verification pipeline flows:
 3. During WHIP signaling, the device posts this SDP Offer to the WebRTC Media Gateway (e.g., MediaMTX).
 4. When the actual UDP connection is established, the Media Gateway and the device perform a standard DTLS handshake. The Media Gateway verifies that the client certificate presented during this handshake matches the fingerprint supplied in the signed SDP Offer.
 
-Thus, the backend control plane only acts as an authenticator for the initial API handshakes (via `CONFIG_VIG_DEVICE_TOKEN`) and an exchange broker. The media encryption and certificate validation are handled entirely on-the-fly by the device and the WebRTC media gateway.
+Thus, the backend control plane only acts as an authenticator for the initial API handshakes (via `CONFIG_VIGO_DEVICE_TOKEN`) and an exchange broker. The media encryption and certificate validation are handled entirely on-the-fly by the device and the WebRTC media gateway.
 
 ---
 
 ## 4. Where is the Public Key?
 
-You might notice that the firmware configuration only defines `CONFIG_VIG_DTLS_KEY_PEM` (the private key) and `CONFIG_VIG_DTLS_CERT_PEM` (the certificate), without a separate public key variable.
+You might notice that the firmware configuration only defines `CONFIG_VIGO_DTLS_KEY_PEM` (the private key) and `CONFIG_VIGO_DTLS_CERT_PEM` (the certificate), without a separate public key variable.
 
 **This is because the public key is embedded directly inside the X.509 Certificate itself.**
 
 An X.509 certificate is not just a digital signature; it is an ASN.1 structured cryptographic container containing:
 
-1. **Metadata:** Subject details (e.g., `/CN=VigDevice`), validity period, and issuer.
+1. **Metadata:** Subject details (e.g., `/CN=VigoDevice`), validity period, and issuer.
 2. **Subject Public Key Info:** The actual raw ECDSA public key coordinates (the $x$ and $y$ points on the `secp256r1` curve) and the algorithm identifier.
 3. **Issuer's Cryptographic Signature:** Proving that the container has not been tampered with.
 
 During the DTLS Handshake:
 
-- The VIG device sends its certificate (`CONFIG_VIG_DTLS_CERT_PEM`) to the WebRTC Media Gateway over UDP.
+- The VIG device sends its certificate (`CONFIG_VIGO_DTLS_CERT_PEM`) to the WebRTC Media Gateway over UDP.
 - The Gateway extracts the **public key** directly from the certificate's _Subject Public Key Info_ field.
-- The Gateway then uses this public key to verify a cryptographic signature sent by the VIG device during the handshake. This proves that the device possesses the matching private key (`CONFIG_VIG_DTLS_KEY_PEM`) without the private key ever leaving the ESP32-P4 hardware.
+- The Gateway then uses this public key to verify a cryptographic signature sent by the VIG device during the handshake. This proves that the device possesses the matching private key (`CONFIG_VIGO_DTLS_KEY_PEM`) without the private key ever leaving the ESP32-P4 hardware.
 
 ---
 

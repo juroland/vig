@@ -4,19 +4,19 @@
 #include "freertos/task.h"
 #include "net.hpp"
 #include "unity.h"
-#include "vig_backend.hpp"
-#include "vig_telemetry.hpp"
-#include "vig_whip.hpp"
+#include "vigo_backend.hpp"
+#include "vigo_telemetry.hpp"
+#include "vigo_whip.hpp"
 #include <string>
 
 static const char *TAG = "TestBackend";
 
 // MOCK Camera for Telemetry
-class DummyCamera : public vig::camera::CameraManager {
+class DummyCamera : public vigo::camera::CameraManager {
 public:
-  vig::Expected<void> init() override { return {}; }
-  vig::Expected<vig::camera::CameraFrame> capture() override {
-    vig::camera::CameraFrame frame;
+  vigo::Expected<void> init() override { return {}; }
+  vigo::Expected<vigo::camera::CameraFrame> capture() override {
+    vigo::camera::CameraFrame frame;
     frame.width = 64;
     frame.height = 64;
     frame.data.resize(64 * 64 * 1.5);
@@ -34,10 +34,10 @@ TEST_CASE("Backend integration tests", "[backend]") {
 
   std::string api_url = "http://" + g_host_ip + ":8081";
 
-  vig::backend::BackendClient client(api_url, "SIM_CAM_001", "test_token_123");
+  vigo::backend::BackendClient client(api_url, "SIM_CAM_001", "test_token_123");
 
   DummyCamera cam;
-  vig::telemetry::TelemetryCollector collector(cam);
+  vigo::telemetry::TelemetryCollector collector(cam);
   auto telemetry = collector.collect();
 
   ESP_LOGI(TAG, "Sending heartbeat...");
@@ -50,7 +50,7 @@ TEST_CASE("Backend integration tests", "[backend]") {
   TEST_ASSERT_NOT_EMPTY(hb.whip_url.c_str());
 
   ESP_LOGI(TAG, "Testing WHIP streaming...");
-  vig::whip::WhipPublisher whip(hb.whip_url, hb.stream_token);
+  vigo::whip::WhipPublisher whip(hb.whip_url, hb.stream_token);
   auto whip_res = whip.start();
   TEST_ASSERT_TRUE_MESSAGE(whip_res.has_value(), "WHIP Start failed");
 
@@ -62,16 +62,25 @@ TEST_CASE("Backend integration tests", "[backend]") {
 }
 
 extern "C" void app_main(void) {
+#if defined(CONFIG_VIGO_USE_WIFI) && CONFIG_VIGO_USE_WIFI
+  ESP_LOGI(TAG, "Initializing WiFi (SSID: %s)...", CONFIG_VIGO_WIFI_SSID);
+  auto err = vigo::net::NetworkManager::instance().init_wifi(
+      CONFIG_VIGO_WIFI_SSID, CONFIG_VIGO_WIFI_PASSWORD);
+  if (!err.has_value()) {
+    ESP_LOGE(TAG, "WiFi Init Failed");
+  }
+#else
   ESP_LOGI(TAG, "Initializing Ethernet...");
-  auto err = vig::net::NetworkManager::instance().init_ethernet();
+  auto err = vigo::net::NetworkManager::instance().init_ethernet();
   if (!err.has_value()) {
     ESP_LOGE(TAG, "Ethernet Init Failed");
   }
+#endif
 
   // Wait for DHCP
   ESP_LOGI(TAG, "Waiting for IP...");
   for (int i = 0; i < 10; ++i) {
-    if (vig::net::NetworkManager::instance().is_connected()) {
+    if (vigo::net::NetworkManager::instance().is_connected()) {
       break;
     }
     vTaskDelay(pdMS_TO_TICKS(1000));

@@ -61,8 +61,9 @@ save-config:
 format:
 	find main components -iname '*.hpp' -o -iname '*.cpp' | xargs clang-format -i
 
-build_clang/compile_commands.json:
-	idf.py -B build_clang -DIDF_TOOLCHAIN=clang reconfigure
+build_clang/compile_commands.json: check-config-sync
+	rm -rf build_clang
+	idf.py $(DEVICE_ARG) -B build_clang -DIDF_TOOLCHAIN=clang reconfigure
 
 lint: build_clang/compile_commands.json
 	find main components -iname '*.hpp' -o -iname '*.cpp' | xargs clang-tidy -p build_clang/

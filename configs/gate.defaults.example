@@ -1,10 +1,10 @@
-CONFIG_VIG_HARDWARE_ID="ESP32P4_CAM_GATE"
-CONFIG_VIG_DEVICE_TOKEN="device_token_gate_xyz"
-CONFIG_VIG_API_URL="http://192.168.1.105:8081"
+CONFIG_VIGO_HARDWARE_ID="ESP32P4_CAM_GATE"
+CONFIG_VIGO_DEVICE_TOKEN="device_token_gate_xyz"
+CONFIG_VIGO_API_URL="http://192.168.1.105:8081"
 
 # Network interface: uncomment the block below to use WiFi instead of Ethernet.
 # By default (no override) the device uses the wired Ethernet interface.
 #
-# CONFIG_VIG_USE_WIFI=y
-# CONFIG_VIG_WIFI_SSID="MyNetwork"
-# CONFIG_VIG_WIFI_PASSWORD="MyPassword"
+# CONFIG_VIGO_USE_WIFI=y
+# CONFIG_VIGO_WIFI_SSID="MyNetwork"
+# CONFIG_VIGO_WIFI_PASSWORD="MyPassword"

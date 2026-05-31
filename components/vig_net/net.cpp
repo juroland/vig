@@ -4,7 +4,9 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_wifi.h"
 #include <cstring>
+#include <vector>
 
 static const char *TAG = "VigNet";
 
@@ -221,7 +223,32 @@ Expected<void> NetworkManager::init_wifi(const std::string &ssid,
   ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
   ESP_ERROR_CHECK(esp_wifi_start());
 
+  // Wait a small duration for the transceiver/co-processor interface to stabilize
+  vTaskDelay(pdMS_TO_TICKS(500));
+
+  ESP_LOGI(TAG, "Starting Wi-Fi scan to list available networks...");
+  wifi_scan_config_t scan_config = {};
+  scan_config.show_hidden = true;
+  esp_err_t scan_err = esp_wifi_scan_start(&scan_config, true); // blocking scan
+  if (scan_err == ESP_OK) {
+    uint16_t ap_count = 0;
+    esp_wifi_scan_get_ap_num(&ap_count);
+    ESP_LOGI(TAG, "Scan finished. Found %d access points:", ap_count);
+    if (ap_count > 0) {
+      std::vector<wifi_ap_record_t> ap_records(ap_count);
+      esp_wifi_scan_get_ap_records(&ap_count, ap_records.data());
+      for (int i = 0; i < ap_count; ++i) {
+        ESP_LOGI(TAG, "  - SSID: '%s', RSSI: %d dBm, Channel: %d",
+                 reinterpret_cast<const char *>(ap_records[i].ssid), ap_records[i].rssi,
+                 ap_records[i].primary);
+      }
+    }
+  } else {
+    ESP_LOGE(TAG, "Wi-Fi scan failed: %d", scan_err);
+  }
+
   ESP_LOGI(TAG, "WiFi initialized, connecting to '%s'...", ssid.c_str());
+  esp_wifi_connect();
   return {};
 }
 
@@ -232,16 +259,21 @@ void NetworkManager::wifi_event_handler(void *arg, esp_event_base_t event_base,
   if (event_base == WIFI_EVENT) {
     switch (event_id) {
     case WIFI_EVENT_STA_START:
-      esp_wifi_connect();
+      // Scan and connection trigger are handled synchronously on startup inside
+      // init_wifi()
       break;
     case WIFI_EVENT_STA_CONNECTED:
       ESP_LOGI(TAG, "WiFi connected");
       break;
-    case WIFI_EVENT_STA_DISCONNECTED:
-      ESP_LOGW(TAG, "WiFi disconnected, reconnecting...");
+    case WIFI_EVENT_STA_DISCONNECTED: {
+      wifi_event_sta_disconnected_t *disconn =
+          static_cast<wifi_event_sta_disconnected_t *>(event_data);
+      ESP_LOGW(TAG, "WiFi disconnected, reason = %d, reconnecting...",
+               disconn ? disconn->reason : -1);
       self->connected_ = false;
       esp_wifi_connect();
       break;
+    }
     default:
       break;
     }

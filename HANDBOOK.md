@@ -59,16 +59,7 @@ The `CONFIG_VIG_DEVICE_TOKEN` is a unique long-lived static bearer token configu
 
 ---
 
-## 2. Optional WHIP URL Override: `CONFIG_VIG_WHIP_URL`
-
-By default, the device parses the live video publishing destination (`whip_url`) dynamically returned by the backend heartbeat response. However, you can statically configure `CONFIG_VIG_WHIP_URL` to override this:
-
-- **Empty (Default):** The device dynamically retrieves the streaming endpoint URL from the backend response.
-- **Set (Override):** The device bypasses the dynamic backend-provided WHIP URL and streams directly to this statically configured destination (e.g., `CONFIG_VIG_WHIP_URL="https://webrtc.link.roland-industries.com/whip"`), which is highly useful when separating control servers from media gateways or for direct development.
-
----
-
-## 3. Stream Encryption: `CONFIG_VIG_DTLS_CERT_PEM` & `CONFIG_VIG_DTLS_KEY_PEM`
+## 2. Stream Encryption: `CONFIG_VIG_DTLS_CERT_PEM` & `CONFIG_VIG_DTLS_KEY_PEM`
 
 By default, the firmware includes a fallback keypair in its global Kconfig schema. However, **every production or development device MUST be provisioned with its own unique keypair** for the following critical security reasons:
 
@@ -78,7 +69,7 @@ By default, the firmware includes a fallback keypair in its global Kconfig schem
 
 ---
 
-## 4. Does the Backend Need the DTLS Certificate?
+## 3. Does the Backend Need the DTLS Certificate?
 
 **No. The backend web/API application server does not need to store, parse, or directly use the certificate PEM files.**
 
@@ -96,7 +87,7 @@ Thus, the backend control plane only acts as an authenticator for the initial AP
 
 ---
 
-## 5. Where is the Public Key?
+## 4. Where is the Public Key?
 
 You might notice that the firmware configuration only defines `CONFIG_VIG_DTLS_KEY_PEM` (the private key) and `CONFIG_VIG_DTLS_CERT_PEM` (the certificate), without a separate public key variable.
 
@@ -116,7 +107,7 @@ During the DTLS Handshake:
 
 ---
 
-## 6. Cryptographic Architecture: Why UDP & DTLS Dictate This Model
+## 5. Cryptographic Architecture: Why UDP & DTLS Dictate This Model
 
 The use of on-the-fly certificate validation via SDP fingerprints is directly coupled to WebRTC's reliance on **UDP** and **Peer-to-Peer (P2P)** network architectures:
 
@@ -131,11 +122,11 @@ The use of on-the-fly certificate validation via SDP fingerprints is directly co
 
 ---
 
-## 7. WHIP Protocol Implementation Details
+## 6. WHIP Protocol Implementation Details
 
-### 7.1 SDP Offer Construction
+### 6.1 SDP Offer Construction
 
-The device builds a minimal SDP offer and POSTs it to the WHIP endpoint (`CONFIG_VIG_WHIP_URL` or the URL returned by the heartbeat). The offer includes:
+The device builds a minimal SDP offer and POSTs it to the WHIP endpoint (the URL returned by the heartbeat). The offer includes:
 
 - A single `m=video` line with `RTP/SAVPF` and dynamic payload type `96` mapped to `H264/90000`.
 - `a=fmtp:96 packetization-mode=1;profile-level-id=42e01f` — Baseline Profile Level 3.1 with FU-A fragmentation.
@@ -147,7 +138,7 @@ The device builds a minimal SDP offer and POSTs it to the WHIP endpoint (`CONFIG
 
 The WHIP server must respond with HTTP `201 Created` and an SDP answer in the body. Any other HTTP status code is treated as a failure.
 
-### 7.2 DTLS Role Negotiation
+### 6.2 DTLS Role Negotiation
 
 The DTLS role is determined by the `a=setup:` attribute in the **remote SDP answer**, following RFC 5763:
 
@@ -161,7 +152,7 @@ With MediaMTX the server always answers `a=setup:active`, so the VIG device alwa
 
 When acting as server, the `HelloVerifyRequest` cookie exchange is **disabled** (`mbedtls_ssl_conf_dtls_cookies(..., NULL, NULL, NULL)`). ICE connectivity checks have already cryptographically verified the peer's address via HMAC-SHA1 signed STUN packets, making the cookie round-trip redundant and a source of interoperability failures with WebRTC clients.
 
-### 7.3 ICE Connectivity Checks
+### 6.3 ICE Connectivity Checks
 
 Before the DTLS handshake, the device performs lightweight ICE connectivity checks:
 
@@ -179,7 +170,7 @@ Before the DTLS handshake, the device performs lightweight ICE connectivity chec
 
 3. **Stale packet drain** — after the ICE phase, any residual STUN packets are drained from the socket before handing it over to mbedTLS, preventing the DTLS state machine from seeing unexpected non-DTLS bytes.
 
-### 7.4 SRTP Key Derivation
+### 6.4 SRTP Key Derivation
 
 After the DTLS handshake completes, the device derives SRTP session keys following **RFC 5764 §4.2** and **RFC 3711 §4.3**.
 
@@ -223,7 +214,7 @@ Each sub-key is derived by AES-128-ECB-encrypting a counter block formed from th
 **Step 6 — Pre-import keys into the PSA Crypto hardware engine.**  
 The cipher key and auth key are imported into the PSA keystore once after setup (`psa_import_key`) and reused for every packet. This avoids a per-packet import/destroy cycle which was a significant performance bottleneck at 30 fps.
 
-### 7.5 RTP Packetization
+### 6.5 RTP Packetization
 
 The device sends H.264 encoded frames as RTP streams with payload type `96`:
 
@@ -236,7 +227,7 @@ The device sends H.264 encoded frames as RTP streams with payload type `96`:
 
 RTP timestamps use the 90 kHz clock (`pts_ms * 90`). The SSRC is fixed at `0x12345678` for the session.
 
-### 7.6 SRTP Packet Protection
+### 6.6 SRTP Packet Protection
 
 Each outgoing RTP packet is protected by `srtp_protect()`:
 

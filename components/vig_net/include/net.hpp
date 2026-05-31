@@ -3,7 +3,6 @@
 
 #include "esp_eth.h"
 #include "esp_http_client.h"
-#include "esp_wifi.h"
 #include <expected>
 #include <functional>
 #include <memory>

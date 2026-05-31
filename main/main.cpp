@@ -1,5 +1,6 @@
 #include "esp_log.h"
 #include "esp_system.h"
+
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -221,12 +222,8 @@ private:
                  hb.stream_token.length());
 
         std::string target_whip_url;
-        if (!config::WHIP_URL.empty()) {
-          target_whip_url = std::string(config::WHIP_URL);
-        } else {
-          std::string api_host = extract_host(config::API_BASE_URL);
-          target_whip_url = sanitize_whip_url(hb.whip_url, api_host);
-        }
+        std::string api_host = extract_host(config::API_BASE_URL);
+        target_whip_url = sanitize_whip_url(hb.whip_url, api_host);
 
         // Append token as a query parameter for robust compatibility with MediaMTX auth
         // hooks

@@ -3,6 +3,7 @@
 
 #include "esp_eth.h"
 #include "esp_http_client.h"
+#include "esp_wifi.h"
 #include <expected>
 #include <functional>
 #include <memory>
@@ -34,6 +35,7 @@ public:
   static NetworkManager &instance();
 
   Expected<void> init_ethernet();
+  Expected<void> init_wifi(const std::string &ssid, const std::string &password);
   bool is_connected() const { return connected_; }
 
 private:
@@ -43,6 +45,8 @@ private:
 
   static void eth_event_handler(void *arg, esp_event_base_t event_base,
                                 int32_t event_id, void *event_data);
+  static void wifi_event_handler(void *arg, esp_event_base_t event_base,
+                                 int32_t event_id, void *event_data);
 };
 
 } // namespace vig::net

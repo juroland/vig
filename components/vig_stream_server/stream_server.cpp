@@ -17,7 +17,8 @@ StreamServer::~StreamServer() {
   }
 }
 
-Expected<void> StreamServer::start(int port) {
+Expected<void> StreamServer::start(int port, SnapshotCallback snapshot_cb) {
+  snapshot_cb_ = snapshot_cb;
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = port;
   config.ctrl_port = port + 1;
@@ -67,6 +68,27 @@ Expected<void> StreamServer::start(int port) {
   if (httpd_register_uri_handler(server_handle_, &ws_uri) != ESP_OK) {
     ESP_LOGE(TAG, "Failed to register WebSocket URI handler");
     return std::unexpected(DeviceError::StreamServerInitFailed);
+  }
+
+  // Snapshot URI
+  httpd_uri_t snap_uri = {};
+  snap_uri.uri = "/snapshot";
+  snap_uri.method = HTTP_GET;
+  snap_uri.handler = [](httpd_req_t *req) {
+    auto *self = static_cast<StreamServer *>(req->user_ctx);
+    if (self->snapshot_cb_) {
+      auto jpeg_data = self->snapshot_cb_();
+      if (!jpeg_data.empty()) {
+        httpd_resp_set_type(req, "image/jpeg");
+        return httpd_resp_send(req, (const char *)jpeg_data.data(), jpeg_data.size());
+      }
+    }
+    httpd_resp_send_404(req);
+    return ESP_FAIL;
+  };
+  snap_uri.user_ctx = this;
+  if (httpd_register_uri_handler(server_handle_, &snap_uri) != ESP_OK) {
+    ESP_LOGW(TAG, "Failed to register snapshot URI handler");
   }
 
   return {};

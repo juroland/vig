@@ -59,6 +59,16 @@ dependencies:
     - esp32s31
     - esp32p4
     version: 1.3.6
+  espressif/esp_jpeg:
+    component_hash: defb83669293cbf86d0fa86b475ba5517aceed04ed70db435388c151ab37b5d7
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.3.1
   espressif/esp_sccb_intf:
     component_hash: c071b189e49f40940722aea01a5489f873385cc39cd5b14012341135b85d1a9d
     dependencies:
@@ -77,7 +87,8 @@ direct_dependencies:
 - espressif/cjson
 - espressif/esp_cam_sensor
 - espressif/esp_h264
+- espressif/esp_jpeg
 - idf
-manifest_hash: 851a5a6b1dba735433e1e3a0f1039708f54ce9049048f2fd4d1d4669b3ddfa13
+manifest_hash: c78f1cd475a1a633368f972a90c6b7138d60aebb0f2bf865cce8298a4c025d72
 target: esp32p4
 version: 3.0.0

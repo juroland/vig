@@ -6,5 +6,17 @@ dependencies = [
 ]
 dynamic = ["version"]
 
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+    "pytest-embedded-idf>=1.11.0",
+    "pytest-embedded-serial-esp>=1.11.0",
+    "fastapi>=0.111.0",
+    "uvicorn>=0.30.0"
+]
+
+[tool.setuptools]
+packages = []
+
 [tool.setuptools.dynamic]
 version = {file = ["version.txt"]}

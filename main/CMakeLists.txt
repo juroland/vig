@@ -13,6 +13,9 @@ idf_component_register(
     vig_common
     vig_camera
     vig_stream_server
+    vig_backend
+    vig_telemetry
+    vig_whip
 )
 
 # Inject the version string into the main component during build phase

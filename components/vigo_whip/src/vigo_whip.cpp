@@ -3,6 +3,7 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "h264_encoder.hpp"
 #include "lwip/sockets.h"
@@ -21,6 +22,9 @@
 #include <sstream>
 
 static const char *TAG = "VigWhip";
+
+// Keep-alive timeout: restart the system if no packet is received for 15 seconds
+static constexpr int64_t KEEPALIVE_TIMEOUT_US = 15ULL * 1000000ULL;
 
 // static debug callback for mbedTLS
 static void mbedtls_debug_cb(void *ctx, int level, const char *file, int line,
@@ -238,6 +242,7 @@ Expected<void> WhipPublisher::start() {
   timer_ctx_ = DtlsTimer{};
   received_client_hello_ = false;
   has_error_ = false;
+  last_recv_time_us_ = 0;
 
   // 1. Generate local DTLS Certificates and Private Keys using PSA Hardware Engine
   auto cert_status = generate_dtls_cert();
@@ -357,6 +362,7 @@ Expected<void> WhipPublisher::start() {
   }
 
   ESP_LOGI(TAG, "WHIP Publisher fully initialized and streaming live media.");
+  last_recv_time_us_ = esp_timer_get_time();
   return {};
 }
 
@@ -573,11 +579,27 @@ void WhipPublisher::push_frame(const vigo::camera::EncodedFrame &frame) {
         has_error_ = true;
       }
       break;
+    } else if (r > 0) {
+      last_recv_time_us_ = esp_timer_get_time();
     }
   }
 
   if (has_error_) {
     return;
+  }
+
+  // Verify RTCP/ICE keep-alive timeout
+  if (last_recv_time_us_ > 0) {
+    int64_t now = esp_timer_get_time();
+    if (now - last_recv_time_us_ > KEEPALIVE_TIMEOUT_US) {
+      ESP_LOGE(TAG,
+               "CRITICAL: Keep-alive timeout exceeded (no server packets received for "
+               "%.2f seconds). "
+               "Restarting system...",
+               static_cast<double>(now - last_recv_time_us_) / 1000000.0);
+      vTaskDelay(pdMS_TO_TICKS(100)); // Allow logs to flush
+      esp_restart();
+    }
   }
 
   uint32_t rtp_ts = static_cast<uint32_t>(frame.pts * 90);

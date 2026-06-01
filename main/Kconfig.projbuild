@@ -86,4 +86,29 @@ menu "VIG Device Configuration"
         help
             The PEM-formatted DTLS client private key for WHIP WebRTC publisher.
 
+    config VIGO_MOTION_STRIDE
+        int "Motion detection stride"
+        default 16
+        help
+            The stride for motion detection. Checks every Nth pixel in X and Y.
+
+    config VIGO_MOTION_THRESHOLD
+        int "Motion detection threshold"
+        default 8
+        range 0 255
+        help
+            The activation threshold of each pixel difference.
+
+    config VIGO_MOTION_MIN_CHANGE_RATIO
+        float "Motion detection minimum change ratio"
+        default 0.015
+        help
+            The fraction of active points required to trigger motion.
+
+    config VIGO_MOTION_COOLDOWN_MS
+        int "Motion detection cooldown (ms)"
+        default 10000
+        help
+            The minimum time between motion detection events.
+
 endmenu

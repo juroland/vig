@@ -88,6 +88,9 @@ private:
   bool received_client_hello_{false};
   bool has_error_{false};
 
+  // RTCP/ICE Keep-alive monitor state
+  int64_t last_recv_time_us_{0};
+
   // SRTP transmit context
   SrtpContext srtp_send_;
 

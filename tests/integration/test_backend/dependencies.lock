@@ -5,18 +5,36 @@ dependencies:
       path: ../../../managed_components/espressif__cmake_utilities
       type: local
     version: 0.5.3
+  espressif/dl_fft:
+    dependencies: []
+    source:
+      path: ../../../managed_components/espressif__dl_fft
+      type: local
+    version: 0.4.0
   espressif/eppp_link:
     dependencies: []
     source:
       path: ../../../managed_components/espressif__eppp_link
       type: local
     version: 1.1.5
+  espressif/esp-dsp:
+    dependencies: []
+    source:
+      path: ../../../managed_components/espressif__esp-dsp
+      type: local
+    version: 1.8.0
   espressif/esp_hosted:
     dependencies: []
     source:
       path: ../../../managed_components/espressif__esp_hosted
       type: local
     version: 2.12.8
+  espressif/esp_new_jpeg:
+    dependencies: []
+    source:
+      path: ../../../managed_components/espressif__esp_new_jpeg
+      type: local
+    version: 1.0.1
   espressif/esp_sccb_intf:
     dependencies: []
     source:
@@ -41,12 +59,15 @@ dependencies:
     version: 6.0.1
 direct_dependencies:
 - espressif/cmake_utilities
+- espressif/dl_fft
 - espressif/eppp_link
+- espressif/esp-dsp
 - espressif/esp_hosted
+- espressif/esp_new_jpeg
 - espressif/esp_sccb_intf
 - espressif/esp_serial_slave_link
 - espressif/wifi_remote_over_eppp
 - idf
-manifest_hash: 7cb1ce28a43dbd2477106153c0006d4bad1a7d720d39075a9ae697b070a5f6f3
+manifest_hash: a7e2534f726ddc579a64d38d8e1595fa2552a3ced813b03c80115e8d1161a342
 target: esp32p4
 version: 3.0.0

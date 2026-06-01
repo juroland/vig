@@ -196,7 +196,9 @@ private:
   TaskHandle_t telemetry_task_handle_ = nullptr;
 
   // Motion Detection
-  motion::MotionDetector motion_detector_;
+  motion::MotionDetector motion_detector_{
+      config::MOTION_STRIDE, config::MOTION_THRESHOLD, config::MOTION_MIN_CHANGE_RATIO,
+      config::MOTION_COOLDOWN_MS};
   QueueHandle_t motion_queue_ = nullptr;
   TaskHandle_t motion_upload_task_handle_ = nullptr;
 

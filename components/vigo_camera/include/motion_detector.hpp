@@ -12,8 +12,8 @@ public:
   // threshold: activation threshold of each pixel difference (0-255)
   // min_change_ratio: fraction of active points required to trigger motion (e.g. 0.015
   // for 1.5%) cooldown_ms: minimum time between sent events (e.g. 10000 for 10 seconds)
-  MotionDetector(int stride = 16, uint8_t threshold = 8,
-                 float min_change_ratio = 0.015f, uint32_t cooldown_ms = 10000);
+  MotionDetector(int stride = 16, uint8_t threshold = 8, float min_change_ratio = 0.05f,
+                 uint32_t cooldown_ms = 10000);
 
   ~MotionDetector() = default;
 

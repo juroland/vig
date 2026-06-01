@@ -7,6 +7,8 @@ dependencies:
   espressif/esp_jpeg: "^1.0.0"
   espressif/esp_wifi_remote: "*"
   espressif/esp_hosted: "*"
+  espressif/esp-dl: "*"
+
 
 
 

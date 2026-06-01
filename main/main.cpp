@@ -12,6 +12,7 @@
 #include "device_config.hpp"
 #include "error_types.hpp"
 #include "h264_encoder.hpp"
+#include "motion_detector.hpp"
 #include "net.hpp"
 #include "stream_server.hpp"
 #include "vigo_backend.hpp"
@@ -73,6 +74,16 @@ public:
   ~Device() {
     if (telemetry_task_handle_) {
       vTaskDelete(telemetry_task_handle_);
+    }
+    if (motion_upload_task_handle_) {
+      vTaskDelete(motion_upload_task_handle_);
+    }
+    if (motion_queue_) {
+      std::string *b64_str = nullptr;
+      while (xQueueReceive(motion_queue_, &b64_str, 0) == pdTRUE) {
+        delete b64_str;
+      }
+      vQueueDelete(motion_queue_);
     }
     if (whip_publisher_) {
       whip_publisher_->stop();
@@ -136,6 +147,13 @@ public:
 
     telemetry_collector_ = std::make_unique<telemetry::TelemetryCollector>(*camera_);
 
+    ESP_LOGI(TAG, "Initializing Motion Queue...");
+    motion_queue_ = xQueueCreate(5, sizeof(std::string *));
+    if (!motion_queue_) {
+      ESP_LOGE(TAG, "Failed to create motion upload queue");
+      return std::unexpected(DeviceError::InternalError);
+    }
+
     ESP_LOGI(TAG, "Device initialized successfully.");
     return {};
   }
@@ -150,6 +168,11 @@ public:
     xTaskCreatePinnedToCore(
         [](void *arg) { static_cast<Device *>(arg)->telemetry_task(); },
         "telemetry_task", 8192, this, 3, &telemetry_task_handle_, 0);
+
+    // Start background motion upload task on Core 0
+    xTaskCreatePinnedToCore(
+        [](void *arg) { static_cast<Device *>(arg)->motion_upload_task(); },
+        "motion_upload", 8192, this, 2, &motion_upload_task_handle_, 0);
 
     while (true) {
       vTaskDelay(pdMS_TO_TICKS(1000));
@@ -171,6 +194,11 @@ private:
   std::string active_stream_token_;
 
   TaskHandle_t telemetry_task_handle_ = nullptr;
+
+  // Motion Detection
+  motion::MotionDetector motion_detector_;
+  QueueHandle_t motion_queue_ = nullptr;
+  TaskHandle_t motion_upload_task_handle_ = nullptr;
 
   // Thread-safe shared frame for telemetry collector
   std::mutex latest_frame_mutex_;
@@ -311,6 +339,18 @@ private:
         continue;
       }
 
+      // Check for motion on this frame
+      if (motion_detector_.detect_motion(*frame_res)) {
+        auto telemetry_data = telemetry_collector_->collect(&(*frame_res));
+        if (!telemetry_data.snapshot.empty()) {
+          auto *b64_str = new std::string(std::move(telemetry_data.snapshot));
+          if (xQueueSend(motion_queue_, &b64_str, 0) != pdTRUE) {
+            ESP_LOGW(TAG, "Motion upload queue full, dropping event");
+            delete b64_str;
+          }
+        }
+      }
+
       uint64_t current_pts = esp_timer_get_time() / 1000;
       auto encoded_res =
           encoder_.encode(frame_res->data.data(), frame_res->data.size(), current_pts);
@@ -346,6 +386,27 @@ private:
         if (++frame_idx % 100 == 0) {
           ESP_LOGI(TAG, "Processed 100 frames (Current PTS: %llu)", current_pts);
         }
+      }
+    }
+  }
+
+  void motion_upload_task() {
+    ESP_LOGI(TAG, "Motion upload task started on core %d", xPortGetCoreID());
+    std::string *b64_str = nullptr;
+    while (true) {
+      if (xQueueReceive(motion_queue_, &b64_str, portMAX_DELAY) == pdTRUE &&
+          b64_str != nullptr) {
+        ESP_LOGI(TAG, "Uploading motion event capture...");
+        auto upload_res = backend_client_->send_motion_event(*b64_str);
+        if (!upload_res) {
+          ESP_LOGE(TAG, "Failed to upload motion event: %.*s",
+                   (int)to_string(upload_res.error()).size(),
+                   to_string(upload_res.error()).data());
+        } else {
+          ESP_LOGI(TAG, "Motion event successfully uploaded to backend!");
+        }
+        delete b64_str;
+        b64_str = nullptr;
       }
     }
   }

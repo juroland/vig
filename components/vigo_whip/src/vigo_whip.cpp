@@ -564,8 +564,12 @@ void WhipPublisher::push_frame(const vigo::camera::EncodedFrame &frame) {
   while (true) {
     int r = recv(udp_socket_, dummy, sizeof(dummy), MSG_DONTWAIT);
     if (r < 0) {
-      if (errno != EWOULDBLOCK && errno != EAGAIN && errno != EINTR) {
-        ESP_LOGW(TAG, "recv failed with errno=%d, marking publisher as errored", errno);
+      if (errno == ECONNREFUSED || errno == ECONNRESET || errno == ENOTCONN ||
+          errno == EPIPE) {
+        ESP_LOGW(TAG,
+                 "recv failed with hard connection error, errno=%d, marking publisher "
+                 "as errored",
+                 errno);
         has_error_ = true;
       }
       break;
@@ -649,8 +653,13 @@ void WhipPublisher::send_rtp_packet(const uint8_t *payload, size_t size,
   if (srtp_protect(packet, 12 + size, &out_len)) {
     int sent = send(udp_socket_, packet, out_len, 0);
     if (sent < 0) {
-      if (errno != EWOULDBLOCK && errno != EAGAIN && errno != EINTR) {
-        ESP_LOGW(TAG, "send failed with errno=%d, marking publisher as errored", errno);
+      // Check for hard connection errors on the UDP socket (locally "connected socket")
+      if (errno == ECONNREFUSED || errno == ECONNRESET || errno == ENOTCONN ||
+          errno == EPIPE) {
+        ESP_LOGW(TAG,
+                 "send failed with hard connection error, errno=%d, marking publisher "
+                 "as errored",
+                 errno);
         has_error_ = true;
       }
     }

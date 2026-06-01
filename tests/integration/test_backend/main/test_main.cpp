@@ -1,3 +1,4 @@
+#include "sdkconfig.h"
 #include "camera.hpp"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -50,9 +51,15 @@ TEST_CASE("Backend integration tests", "[backend]") {
   TEST_ASSERT_NOT_EMPTY(hb.whip_url.c_str());
 
   ESP_LOGI(TAG, "Testing WHIP streaming...");
-  vigo::whip::WhipPublisher whip(hb.whip_url, hb.stream_token);
+  vigo::whip::WhipPublisher whip(hb.whip_url, hb.stream_token, "", "");
   auto whip_res = whip.start();
+
   TEST_ASSERT_TRUE_MESSAGE(whip_res.has_value(), "WHIP Start failed");
+
+  ESP_LOGI(TAG, "Sending motion event...");
+  std::string dummy_capture = "dummy_base64_jpeg_capture_data";
+  auto motion_res = client.send_motion_event(dummy_capture);
+  TEST_ASSERT_TRUE_MESSAGE(motion_res.has_value(), "Motion event request failed");
 
   ESP_LOGI(TAG, "Sending offline...");
   auto off_res = client.send_offline();

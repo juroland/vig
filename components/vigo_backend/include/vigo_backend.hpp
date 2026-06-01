@@ -28,6 +28,8 @@ public:
 
   Expected<void> send_offline();
 
+  Expected<void> send_motion_event(const std::string &base64_jpeg);
+
 private:
   std::string api_base_url_;
   std::string hardware_id_;

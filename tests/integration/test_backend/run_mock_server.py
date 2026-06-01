@@ -1,7 +1,8 @@
 import socket
 import uvicorn
 from fastapi import FastAPI, Header, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from datetime import datetime
 
 app = FastAPI()
 
@@ -18,6 +19,14 @@ class Heartbeat(BaseModel):
 
 class Offline(BaseModel):
     hardware_id: str
+
+class MotionEventRequest(BaseModel):
+    """Payload for a device-reported motion capture event."""
+
+    hardware_id: str = Field(..., min_length=1, max_length=128)
+    timestamp: datetime | None = None
+    capture: str = Field(..., description="Base64 encoded JPEG capture")
+
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -55,6 +64,17 @@ async def offline(req: Offline, authorization: str = Header(None)):
     print(f"  Hardware ID: {req.hardware_id}")
     print(f"  Auth: {authorization}")
     return {"status": "ok"}
+
+@app.post("/api/devices/motion")
+@app.post("/motion")
+async def motion(req: MotionEventRequest, authorization: str = Header(None)):
+    print(f"\n[Motion Event Received]")
+    print(f"  Hardware ID: {req.hardware_id}")
+    print(f"  Auth: {authorization}")
+    print(f"  Timestamp: {req.timestamp}")
+    print(f"  Capture length: {len(req.capture)} characters base64")
+    return {"status": "ok"}
+
 
 @app.post("/whip")
 async def whip(req: Request, authorization: str = Header(None)):

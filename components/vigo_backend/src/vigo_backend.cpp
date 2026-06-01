@@ -95,4 +95,29 @@ Expected<void> BackendClient::send_offline() {
   return {};
 }
 
+Expected<void> BackendClient::send_motion_event(const std::string &base64_jpeg) {
+  cJSON *root = cJSON_CreateObject();
+  if (!root)
+    return std::unexpected(DeviceError::InternalError);
+
+  std::unique_ptr<cJSON, decltype(&cJSON_Delete)> root_ptr(root, cJSON_Delete);
+  cJSON_AddStringToObject(root, "hardware_id", hardware_id_.c_str());
+  cJSON_AddNullToObject(root, "timestamp");
+  cJSON_AddStringToObject(root, "capture", base64_jpeg.c_str());
+
+  char *json_str = cJSON_PrintUnformatted(root);
+  if (!json_str)
+    return std::unexpected(DeviceError::InternalError);
+  std::string payload(json_str);
+  cJSON_free(json_str);
+
+  vigo::net::HttpClient client(api_base_url_ + "/api/devices/motion", setup_token_);
+  auto resp_res = client.post_json(payload);
+  if (!resp_res.has_value()) {
+    return std::unexpected(resp_res.error());
+  }
+
+  return {};
+}
+
 } // namespace vigo::backend

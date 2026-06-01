@@ -1,10 +1,11 @@
 import multiprocessing
 import socket
 import time
+from datetime import datetime
 
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pytest_embedded import Dut
 
 app = FastAPI()
@@ -22,6 +23,14 @@ class Heartbeat(BaseModel):
 
 class Offline(BaseModel):
     hardware_id: str
+
+class MotionEventRequest(BaseModel):
+    """Payload for a device-reported motion capture event."""
+
+    hardware_id: str = Field(..., min_length=1, max_length=128)
+    timestamp: datetime | None = None
+    capture: str = Field(..., description="Base64 encoded JPEG capture")
+
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -54,6 +63,14 @@ async def offline(req: Offline, authorization: str = Header(None)):
     if authorization != "Bearer test_token_123":
         raise HTTPException(status_code=401)
     return {"status": "ok"}
+
+@app.post("/api/devices/motion")
+@app.post("/motion")
+async def motion(req: MotionEventRequest, authorization: str = Header(None)):
+    if authorization != "Bearer test_token_123":
+        raise HTTPException(status_code=401)
+    return {"status": "ok"}
+
 
 @app.post("/whip")
 async def whip(req: Request, authorization: str = Header(None)):

@@ -76,3 +76,6 @@ test-backend-flash: test-backend-build
 
 test-backend-run:
 	cd tests/integration/test_backend && uv run pytest pytest_backend_integration.py --target esp32p4 --port $(PORT)
+
+test-unit-build:
+	cd tests/unit && idf.py set-target esp32p4 && idf.py build

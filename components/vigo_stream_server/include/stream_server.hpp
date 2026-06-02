@@ -5,6 +5,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "h264_encoder.hpp"
+#include <driver/jpeg_encode.h>
 #include <functional>
 #include <list>
 #include <memory>
@@ -38,6 +39,7 @@ private:
   std::list<Client> clients_;
 
   SnapshotCallback snapshot_cb_ = nullptr;
+  jpeg_encoder_handle_t jpeg_engine_{nullptr};
 
   static esp_err_t ws_handler(httpd_req_t *req);
 };

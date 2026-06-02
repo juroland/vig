@@ -1,6 +1,6 @@
 idf_component_register(SRCS "stream_server.cpp"
         INCLUDE_DIRS "include"
-        REQUIRES "esp_http_server" "freertos" "vigo_camera" "vigo_common")
+        REQUIRES "esp_http_server" "freertos" "vigo_camera" "vigo_common" "esp_driver_jpeg")
 
 # Custom command to generate stream_page.h from template and JMuxer
 add_custom_command(OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/include/stream_page.h"

@@ -1,5 +1,6 @@
 #include "stream_server.hpp"
 #include "esp_log.h"
+#include "pedestrian_detector.hpp"
 #include "stream_page.h"
 #include <cstring>
 #include <netinet/tcp.h>
@@ -20,6 +21,15 @@ StreamServer::~StreamServer() {
 
 Expected<void> StreamServer::start(int port, SnapshotCallback snapshot_cb) {
   snapshot_cb_ = snapshot_cb;
+
+  // Initialize persistent JPEG encoder engine
+  jpeg_encode_engine_cfg_t eng_cfg = {};
+  eng_cfg.timeout_ms = 1000;
+  eng_cfg.intr_priority = 0;
+  if (jpeg_new_encoder_engine(&eng_cfg, &jpeg_engine_) != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to create persistent JPEG encoder engine for StreamServer");
+  }
+
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = port;
   config.ctrl_port = port + 1;
@@ -92,6 +102,82 @@ Expected<void> StreamServer::start(int port, SnapshotCallback snapshot_cb) {
     ESP_LOGW(TAG, "Failed to register snapshot URI handler");
   }
 
+  // Debug info URI
+  httpd_uri_t debug_info_uri = {};
+  debug_info_uri.uri = "/debug/info";
+  debug_info_uri.method = HTTP_GET;
+  debug_info_uri.handler = [](httpd_req_t *req) {
+    std::vector<uint8_t> yuyv_data;
+    int width = 0;
+    int height = 0;
+    float probability = 0.0f;
+    vigo::detection::PedestrianDetect::get_debug_frame(yuyv_data, width, height,
+                                                       probability);
+
+    char json[64];
+    snprintf(json, sizeof(json), "{\"probability\": %.4f}", probability);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache, no-store, must-revalidate");
+    return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
+  };
+  debug_info_uri.user_ctx = nullptr;
+  if (httpd_register_uri_handler(server_handle_, &debug_info_uri) != ESP_OK) {
+    ESP_LOGW(TAG, "Failed to register debug info URI handler");
+  }
+
+  // Debug image URI
+  httpd_uri_t debug_img_uri = {};
+  debug_img_uri.uri = "/debug/image";
+  debug_img_uri.method = HTTP_GET;
+  debug_img_uri.handler = [](httpd_req_t *req) {
+    auto *self = static_cast<StreamServer *>(req->user_ctx);
+    std::vector<uint8_t> yuyv_data;
+    int width = 0;
+    int height = 0;
+    float probability = 0.0f;
+    if (vigo::detection::PedestrianDetect::get_debug_frame(yuyv_data, width, height,
+                                                           probability)) {
+      if (self->jpeg_engine_) {
+        jpeg_encode_cfg_t enc_cfg = {};
+        enc_cfg.width = width;
+        enc_cfg.height = height;
+        enc_cfg.src_type = JPEG_ENCODE_IN_FORMAT_YUV422;
+        enc_cfg.sub_sample = JPEG_DOWN_SAMPLING_YUV422;
+        enc_cfg.image_quality = 80;
+        enc_cfg.pixel_reverse = true;
+
+        size_t outbuf_size = width * height;
+        jpeg_encode_memory_alloc_cfg_t mem_cfg = {};
+        mem_cfg.buffer_direction = JPEG_ENC_ALLOC_OUTPUT_BUFFER;
+        size_t actual_out_size = 0;
+        uint8_t *outbuf = static_cast<uint8_t *>(
+            jpeg_alloc_encoder_mem(outbuf_size, &mem_cfg, &actual_out_size));
+        if (outbuf) {
+          uint32_t out_size = 0;
+          esp_err_t err = jpeg_encoder_process(self->jpeg_engine_, &enc_cfg,
+                                               yuyv_data.data(), yuyv_data.size(),
+                                               outbuf, actual_out_size, &out_size);
+          if (err == ESP_OK && out_size > 0) {
+            httpd_resp_set_type(req, "image/jpeg");
+            httpd_resp_set_hdr(req, "Cache-Control",
+                               "no-cache, no-store, must-revalidate");
+            esp_err_t ret = httpd_resp_send(req, (const char *)outbuf, out_size);
+            heap_caps_free(outbuf);
+            return ret;
+          }
+          heap_caps_free(outbuf);
+        }
+      }
+    }
+    httpd_resp_send_404(req);
+    return ESP_FAIL;
+  };
+  debug_img_uri.user_ctx = this;
+  if (httpd_register_uri_handler(server_handle_, &debug_img_uri) != ESP_OK) {
+    ESP_LOGW(TAG, "Failed to register debug image URI handler");
+  }
+
   return {};
 }
 
@@ -99,6 +185,10 @@ void StreamServer::stop() {
   if (server_handle_) {
     httpd_stop(server_handle_);
     server_handle_ = nullptr;
+  }
+  if (jpeg_engine_) {
+    jpeg_del_encoder_engine(jpeg_engine_);
+    jpeg_engine_ = nullptr;
   }
 }
 

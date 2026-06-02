@@ -11,10 +11,9 @@
 #include "camera.hpp"
 #include "device_config.hpp"
 #include "error_types.hpp"
-#include "h264_encoder.hpp"
-#include "motion_detector.hpp"
 #include "net.hpp"
 #include "stream_server.hpp"
+#include "surveillance_pipeline.hpp"
 #include "vigo_backend.hpp"
 #include "vigo_telemetry.hpp"
 #include "vigo_whip.hpp"
@@ -27,6 +26,11 @@
 static const char *TAG = "VigoDevice";
 
 namespace vigo {
+
+struct MotionEventPayload {
+  std::string base64_jpeg;
+  std::vector<backend::DetectionResult> detections;
+};
 
 static std::string extract_host(std::string_view url) {
   size_t scheme_pos = url.find("://");
@@ -79,9 +83,9 @@ public:
       vTaskDelete(motion_upload_task_handle_);
     }
     if (motion_queue_) {
-      std::string *b64_str = nullptr;
-      while (xQueueReceive(motion_queue_, &b64_str, 0) == pdTRUE) {
-        delete b64_str;
+      MotionEventPayload *payload = nullptr;
+      while (xQueueReceive(motion_queue_, &payload, 0) == pdTRUE) {
+        delete payload;
       }
       vQueueDelete(motion_queue_);
     }
@@ -195,10 +199,10 @@ private:
 
   TaskHandle_t telemetry_task_handle_ = nullptr;
 
-  // Motion Detection
-  motion::MotionDetector motion_detector_{
+  // Cascading Inference Pipeline
+  pipeline::SurveillancePipeline surveillance_pipeline_{
       config::MOTION_STRIDE, config::MOTION_THRESHOLD, config::MOTION_MIN_CHANGE_RATIO,
-      config::MOTION_COOLDOWN_MS};
+      config::MOTION_COOLDOWN_MS, 0.75f};
   QueueHandle_t motion_queue_ = nullptr;
   TaskHandle_t motion_upload_task_handle_ = nullptr;
 
@@ -341,16 +345,27 @@ private:
         continue;
       }
 
-      // Check for motion on this frame
-      if (motion_detector_.detect_motion(*frame_res)) {
+      // Run the cascading surveillance pipeline on the frame
+      auto pipeline_res = surveillance_pipeline_.process(*frame_res);
+      if (pipeline_res.pedestrian_confirmed) {
+        // ONLY when a pedestrian is confirmed, we serialize and push metadata to queue
         auto telemetry_data = telemetry_collector_->collect(&(*frame_res));
         if (!telemetry_data.snapshot.empty()) {
-          auto *b64_str = new std::string(std::move(telemetry_data.snapshot));
-          if (xQueueSend(motion_queue_, &b64_str, 0) != pdTRUE) {
+          auto *payload = new MotionEventPayload{std::move(telemetry_data.snapshot),
+                                                 std::move(pipeline_res.detections)};
+          if (xQueueSend(motion_queue_, &payload, 0) != pdTRUE) {
             ESP_LOGW(TAG, "Motion upload queue full, dropping event");
-            delete b64_str;
+            delete payload;
           }
         }
+      } else if (pipeline_res.motion_detected) {
+        ESP_LOGI(
+            TAG,
+            "Motion detected but no pedestrian confirmed; skipping backend upload");
+      } else {
+        // Guard / Filter short-circuit: delay to save CPU cycles when there is no
+        // activity
+        vTaskDelay(pdMS_TO_TICKS(100));
       }
 
       uint64_t current_pts = esp_timer_get_time() / 1000;
@@ -394,12 +409,14 @@ private:
 
   void motion_upload_task() {
     ESP_LOGI(TAG, "Motion upload task started on core %d", xPortGetCoreID());
-    std::string *b64_str = nullptr;
+    MotionEventPayload *payload = nullptr;
     while (true) {
-      if (xQueueReceive(motion_queue_, &b64_str, portMAX_DELAY) == pdTRUE &&
-          b64_str != nullptr) {
-        ESP_LOGI(TAG, "Uploading motion event capture...");
-        auto upload_res = backend_client_->send_motion_event(*b64_str);
+      if (xQueueReceive(motion_queue_, &payload, portMAX_DELAY) == pdTRUE &&
+          payload != nullptr) {
+        ESP_LOGI(TAG, "Uploading motion event capture with %zu detections...",
+                 payload->detections.size());
+        auto upload_res = backend_client_->send_motion_event(payload->base64_jpeg,
+                                                             payload->detections);
         if (!upload_res) {
           ESP_LOGE(TAG, "Failed to upload motion event: %.*s",
                    (int)to_string(upload_res.error()).size(),
@@ -407,8 +424,8 @@ private:
         } else {
           ESP_LOGI(TAG, "Motion event successfully uploaded to backend!");
         }
-        delete b64_str;
-        b64_str = nullptr;
+        delete payload;
+        payload = nullptr;
       }
     }
   }

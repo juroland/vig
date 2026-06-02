@@ -204,6 +204,17 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.6.0
+  espressif/pedestrian_detect:
+    component_hash: 882a6986cb5e7e9bb8e87861fb42379a7eeb2f4a4a78104c6a78f42a6cb35fb4
+    dependencies:
+    - name: espressif/esp-dl
+      registry_url: https://components.espressif.com
+      require: private
+      version: ~3.3.0
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 0.3.2
   espressif/wifi_remote_over_eppp:
     component_hash: 06d8bc15348bbd21f1390daace36ed5adcf6026c93c5b69decc55fa04df2711a
     dependencies:
@@ -230,7 +241,8 @@ direct_dependencies:
 - espressif/esp_hosted
 - espressif/esp_jpeg
 - espressif/esp_wifi_remote
+- espressif/pedestrian_detect
 - idf
-manifest_hash: 70c6d76166d5e1f84901b678db69ca96fd5a78d7700a3ebdf723afe656331b74
+manifest_hash: 03d4e82de095bbbbc5287cb69637a55ed01af75c6e082d7706534cbaae6a36a5
 target: esp32p4
 version: 3.0.0

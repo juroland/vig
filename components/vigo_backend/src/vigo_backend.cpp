@@ -95,7 +95,9 @@ Expected<void> BackendClient::send_offline() {
   return {};
 }
 
-Expected<void> BackendClient::send_motion_event(const std::string &base64_jpeg) {
+Expected<void>
+BackendClient::send_motion_event(const std::string &base64_jpeg,
+                                 const std::vector<DetectionResult> &detections) {
   cJSON *root = cJSON_CreateObject();
   if (!root)
     return std::unexpected(DeviceError::InternalError);
@@ -104,6 +106,28 @@ Expected<void> BackendClient::send_motion_event(const std::string &base64_jpeg) 
   cJSON_AddStringToObject(root, "hardware_id", hardware_id_.c_str());
   cJSON_AddNullToObject(root, "timestamp");
   cJSON_AddStringToObject(root, "capture", base64_jpeg.c_str());
+
+  if (!detections.empty()) {
+    cJSON *dets_arr = cJSON_AddArrayToObject(root, "detections");
+    for (const auto &det : detections) {
+      cJSON *det_obj = cJSON_CreateObject();
+      if (det_obj) {
+        cJSON *box_arr = cJSON_CreateArray();
+        if (box_arr) {
+          for (float coord : det.box) {
+            cJSON_AddItemToArray(box_arr,
+                                 cJSON_CreateNumber(static_cast<double>(coord)));
+          }
+          cJSON_AddItemToObject(det_obj, "box", box_arr);
+        }
+        cJSON_AddNumberToObject(det_obj, "score", static_cast<double>(det.score));
+        cJSON_AddStringToObject(det_obj, "label", det.label.c_str());
+        cJSON_AddItemToArray(dets_arr, det_obj);
+      }
+    }
+  } else {
+    cJSON_AddNullToObject(root, "detections");
+  }
 
   char *json_str = cJSON_PrintUnformatted(root);
   if (!json_str)

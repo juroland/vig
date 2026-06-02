@@ -8,6 +8,7 @@ dependencies:
   espressif/esp_wifi_remote: "*"
   espressif/esp_hosted: "*"
   espressif/esp-dl: "*"
+  espressif/pedestrian_detect: "^0.3.2"
 
 
 

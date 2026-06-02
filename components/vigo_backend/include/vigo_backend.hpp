@@ -4,8 +4,15 @@
 #include "vigo_telemetry.hpp"
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace vigo::backend {
+
+struct DetectionResult {
+  std::vector<float> box; // [x_min, y_min, x_max, y_max] normalized coordinates
+  float score;
+  std::string label;
+};
 
 struct HeartbeatResponse {
   bool ack{false};
@@ -28,7 +35,8 @@ public:
 
   Expected<void> send_offline();
 
-  Expected<void> send_motion_event(const std::string &base64_jpeg);
+  Expected<void> send_motion_event(const std::string &base64_jpeg,
+                                   const std::vector<DetectionResult> &detections = {});
 
 private:
   std::string api_base_url_;

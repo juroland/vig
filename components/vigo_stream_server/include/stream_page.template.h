@@ -67,9 +67,108 @@ static const char stream_page_html[] = R"HTML(
 
         .main-container {
             width: 100%;
-            max-width: 960px;
-            position: relative;
+            max-width: 1100px;
+            display: grid;
+            grid-template-columns: 1.4fr 1fr;
+            gap: 24px;
             animation: fadeInUp 0.8s ease-out;
+        }
+
+        @media (max-width: 768px) {
+            .main-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .debug-card {
+            background: var(--card);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 20px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .debug-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.25rem;
+            color: #fff;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .debug-title .dot {
+            width: 8px;
+            height: 8px;
+            background: var(--secondary);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--secondary);
+        }
+
+        .debug-image-wrapper {
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            position: relative;
+        }
+
+        .debug-image {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        .debug-stats {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .debug-stat-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.03);
+            padding: 10px 14px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .debug-stat-label {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            text-transform: uppercase;
+        }
+
+        .debug-stat-value {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.1rem;
+            color: #fff;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%);
+            transition: width 0.3s ease;
         }
 
         .video-card {
@@ -241,38 +340,71 @@ static const char stream_page_html[] = R"HTML(
     </div>
 
     <div class="main-container">
-        <div class="video-card">
-            <div id="loading" class="loading-overlay">
-                <div class="spinner"></div>
-                <p style="margin-top: 16px; font-weight: 600;">Establishing Secure Link...</p>
-                <div id="error-msg">Connection failed. Retrying...</div>
-            </div>
-
-            <div class="overlay-status">
-                <div id="status-badge" class="badge badge-disconnected">
-                    <div id="status-pulse"></div>
-                    <span id="status-text">Offline</span>
+        <!-- Left Column: Video and Stats -->
+        <div style="display: flex; flex-direction: column; gap: 24px; width: 100%;">
+            <div class="video-card">
+                <div id="loading" class="loading-overlay">
+                    <div class="spinner"></div>
+                    <p style="margin-top: 16px; font-weight: 600;">Establishing Secure Link...</p>
+                    <div id="error-msg">Connection failed. Retrying...</div>
                 </div>
-                <div class="badge badge-info">1280x960</div>
+
+                <div class="overlay-status">
+                    <div id="status-badge" class="badge badge-disconnected">
+                        <div id="status-pulse"></div>
+                        <span id="status-text">Offline</span>
+                    </div>
+                    <div class="badge badge-info">1280x960</div>
+                </div>
+
+                <div class="video-wrapper">
+                    <video id="player" autoplay muted playsinline></video>
+                </div>
             </div>
 
-            <div class="video-wrapper">
-                <video id="player" autoplay muted playsinline></video>
+            <div class="controls">
+                <div class="stat-box">
+                    <span class="stat-label">Frame Rate</span>
+                    <span class="stat-value"><span id="fps-val">0.0</span> <span style="font-size: 0.8rem; color: var(--text-dim)">FPS</span></span>
+                </div>
+                <div class="stat-box">
+                    <span class="stat-label">Link Status</span>
+                    <span class="stat-value" id="bitrate-val">STABLE</span>
+                </div>
+                <div class="stat-box">
+                    <span class="stat-label">Latency</span>
+                    <span class="stat-value"><span id="latency-val">--</span> <span style="font-size: 0.8rem; color: var(--text-dim)">MS</span></span>
+                </div>
             </div>
         </div>
 
-        <div class="controls">
-            <div class="stat-box">
-                <span class="stat-label">Frame Rate</span>
-                <span class="stat-value"><span id="fps-val">0.0</span> <span style="font-size: 0.8rem; color: var(--text-dim)">FPS</span></span>
+        <!-- Right Column: AI diagnostics -->
+        <div class="debug-card">
+            <div class="debug-title">
+                <div class="dot"></div>
+                <span>AI Inference Diagnostics</span>
             </div>
-            <div class="stat-box">
-                <span class="stat-label">Link Status</span>
-                <span class="stat-value" id="bitrate-val">STABLE</span>
+            <div class="debug-image-wrapper">
+                <img id="debug-img" class="debug-image" alt="Inference View (640x480)">
             </div>
-            <div class="stat-box">
-                <span class="stat-label">Latency</span>
-                <span class="stat-value"><span id="latency-val">--</span> <span style="font-size: 0.8rem; color: var(--text-dim)">MS</span></span>
+            <div class="debug-stats">
+                <div class="debug-stat-row">
+                    <span class="debug-stat-label">Model Target</span>
+                    <span class="debug-stat-value" style="color: var(--secondary)">pico_s8_v1_p4</span>
+                </div>
+                <div class="debug-stat-row" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                    <div style="display: flex; justify-content: space-between;">
+                        <span class="debug-stat-label">Confidence Score</span>
+                        <span class="debug-stat-value" id="confidence-val">0.0%</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div id="confidence-bar" class="progress-bar"></div>
+                    </div>
+                </div>
+                <div class="debug-stat-row">
+                    <span class="debug-stat-label">Inference Dimensions</span>
+                    <span class="debug-stat-value">640x480</span>
+                </div>
             </div>
         </div>
     </div>
@@ -336,6 +468,31 @@ static const char stream_page_html[] = R"HTML(
             ws = new WebSocket(wsUrl);
             ws.binaryType = 'arraybuffer';
 
+            let debugInterval = null;
+
+            function updateDebugDiagnostics() {
+                fetch('/debug/info')
+                    .then(res => res.json())
+                    .then(data => {
+                        const prob = data.probability;
+                        const confidencePercent = (prob * 100).toFixed(1) + '%';
+                        document.getElementById('confidence-val').innerText = confidencePercent;
+                        document.getElementById('confidence-bar').style.width = (prob * 100) + '%';
+
+                        if (prob >= 0.75) {
+                            document.getElementById('confidence-bar').style.background = 'linear-gradient(90deg, var(--success) 0%, #34d399 100%)';
+                        } else {
+                            document.getElementById('confidence-bar').style.background = 'linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%)';
+                        }
+
+                        const debugImg = document.getElementById('debug-img');
+                        debugImg.src = `/debug/image?t=${Date.now()}`;
+                    })
+                    .catch(err => {
+                        // Fail silently to keep console clean
+                    });
+            }
+
             ws.onopen = () => {
                 console.log('Connected to VisionLink Stream');
                 statusBadge.className = 'badge badge-live';
@@ -346,6 +503,11 @@ static const char stream_page_html[] = R"HTML(
 
                 // Trigger the ESP32 ws_handler by sending a HELO message
                 ws.send('HELO');
+
+                // Start polling debug diagnostics
+                if (debugInterval) clearInterval(debugInterval);
+                updateDebugDiagnostics();
+                debugInterval = setInterval(updateDebugDiagnostics, 500);
             };
 
             ws.onmessage = (event) => {
@@ -377,6 +539,11 @@ static const char stream_page_html[] = R"HTML(
                 statusText.innerText = 'Disconnected';
                 loadingOverlay.classList.remove('hidden');
                 errorMsg.style.display = 'block';
+
+                if (debugInterval) {
+                    clearInterval(debugInterval);
+                    debugInterval = null;
+                }
 
                 // Attempt reconnect
                 clearTimeout(reconnectTimeout);

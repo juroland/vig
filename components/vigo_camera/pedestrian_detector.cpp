@@ -1,25 +1,32 @@
 #include "pedestrian_detector.hpp"
-#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "sdkconfig.h"
+#include <algorithm>
 
-// Include the official Espressif pedestrian detect component header
+// Include the official Espressif pedestrian detect
 #include "pedestrian_detect.hpp"
 
-static const char *TAG = "PedestrianDetect";
+static const char *TAG = "PedestrianDetector";
 
 namespace vigo::detection {
 
-PedestrianDetect::PedestrianDetect(float confidence_threshold)
-    : confidence_threshold_(confidence_threshold) {
+PedestrianDetector::PedestrianDetector(int frame_width, int frame_height,
+                                       float confidence_threshold)
+    : confidence_threshold_{confidence_threshold},
+      input_frame_height_{static_cast<size_t>(frame_height)},
+      input_frame_width_{static_cast<size_t>(frame_width)},
+      inference_frame_height_{static_cast<size_t>(frame_height / 2)},
+      inference_frame_width_{static_cast<size_t>(frame_width / 2)},
+      inference_frame_bytes_{inference_frame_width_ * inference_frame_height_ * 2},
+      inference_frame_(inference_frame_bytes_) {
 #ifndef CONFIG_VIGO_USE_MOCK_CAMERA
   ESP_LOGI(TAG, "Initializing hardware PedestrianDetect pico_s8_v1 model...");
-  impl_ =
-      new ::PedestrianDetect(::PedestrianDetect::PICO_S8_V1, true); // lazy_load = true
+  impl_ = new ::PedestrianDetect(::PedestrianDetect::PICO_S8_V1,
+                                 true); // lazy_load = true
 #endif
 }
 
-PedestrianDetect::~PedestrianDetect() {
+PedestrianDetector::~PedestrianDetector() {
   if (impl_) {
     delete impl_;
     impl_ = nullptr;
@@ -67,8 +74,8 @@ static void convert_ouyy_evyy_to_yuyv_binned(const uint8_t *src, uint8_t *dst,
   }
 }
 
-void PedestrianDetect::update_debug_frame(const uint8_t *yuyv, int width, int height,
-                                          float probability) {
+void PedestrianDetector::update_debug_frame(const uint8_t *yuyv, int width, int height,
+                                            float probability) {
   std::lock_guard<std::mutex> lock(debug_mutex_);
   if (!yuyv || width <= 0 || height <= 0) {
     debug_frame_.has_frame = false;
@@ -82,8 +89,8 @@ void PedestrianDetect::update_debug_frame(const uint8_t *yuyv, int width, int he
   debug_frame_.has_frame = true;
 }
 
-bool PedestrianDetect::get_debug_frame(std::vector<uint8_t> &yuyv_out, int &width_out,
-                                       int &height_out, float &probability_out) {
+bool PedestrianDetector::get_debug_frame(std::vector<uint8_t> &yuyv_out, int &width_out,
+                                         int &height_out, float &probability_out) {
   std::lock_guard<std::mutex> lock(debug_mutex_);
   if (!debug_frame_.has_frame) {
     return false;
@@ -96,22 +103,11 @@ bool PedestrianDetect::get_debug_frame(std::vector<uint8_t> &yuyv_out, int &widt
 }
 
 std::vector<vigo::backend::DetectionResult>
-PedestrianDetect::detect(const vigo::camera::CameraFrame &frame) {
+PedestrianDetector::detect(const vigo::camera::CameraFrame &frame) {
   std::vector<vigo::backend::DetectionResult> results;
 
-  int snapshot_width = frame.width / 2;
-  int snapshot_height = frame.height / 2;
-  size_t yuyv_size = snapshot_width * snapshot_height * 2;
-
-  uint8_t *yuyv_buf =
-      static_cast<uint8_t *>(heap_caps_malloc(yuyv_size, MALLOC_CAP_SPIRAM));
-  if (!yuyv_buf) {
-    ESP_LOGE(TAG, "Failed to allocate YUYV conversion buffer for pedestrian detect");
-    return results;
-  }
-
-  convert_ouyy_evyy_to_yuyv_binned(frame.data.data(), yuyv_buf, frame.width,
-                                   frame.height);
+  convert_ouyy_evyy_to_yuyv_binned(frame.data.data(), inference_frame_.data(),
+                                   input_frame_width_, input_frame_height_);
 
   // Under mock/testing settings
   if (sim_pedestrian_present_) {
@@ -132,12 +128,12 @@ PedestrianDetect::detect(const vigo::camera::CameraFrame &frame) {
       ESP_LOGD(TAG, "Inference completed: No pedestrian detected (Simulated)");
     }
 
-    // Draw mock bounding boxes on yuyv_buf
+    // Draw mock bounding boxes on inference_frame_
     for (const auto &res : results) {
-      int x1 = static_cast<int>(res.box[0] * snapshot_width);
-      int y1 = static_cast<int>(res.box[1] * snapshot_height);
-      int x2 = static_cast<int>(res.box[2] * snapshot_width);
-      int y2 = static_cast<int>(res.box[3] * snapshot_height);
+      int x1 = static_cast<int>(res.box[0] * inference_frame_width_);
+      int y1 = static_cast<int>(res.box[1] * inference_frame_height_);
+      int x2 = static_cast<int>(res.box[2] * inference_frame_width_);
+      int y2 = static_cast<int>(res.box[3] * inference_frame_height_);
 
       uint8_t Y_val = 149;
       uint8_t U_val = 44;
@@ -145,42 +141,46 @@ PedestrianDetect::detect(const vigo::camera::CameraFrame &frame) {
 
       // Draw horizontal lines
       for (int y : {y1, y2}) {
-        if (y >= 0 && y < snapshot_height) {
-          int start_x = std::clamp(std::min(x1, x2), 0, snapshot_width - 1);
-          int end_x = std::clamp(std::max(x1, x2), 0, snapshot_width - 1);
+        if (y >= 0 && y < static_cast<int>(inference_frame_height_)) {
+          int start_x = std::clamp(std::min(x1, x2), 0,
+                                   static_cast<int>(inference_frame_width_) - 1);
+          int end_x = std::clamp(std::max(x1, x2), 0,
+                                 static_cast<int>(inference_frame_width_) - 1);
           for (int x = start_x; x <= end_x; ++x) {
-            yuyv_buf[y * snapshot_width * 2 + x * 2] = Y_val;
+            inference_frame_[y * inference_frame_width_ * 2 + x * 2] = Y_val;
             int chroma_idx = (x / 2) * 4;
-            yuyv_buf[y * snapshot_width * 2 + chroma_idx + 1] = U_val;
-            yuyv_buf[y * snapshot_width * 2 + chroma_idx + 3] = V_val;
+            inference_frame_[y * inference_frame_width_ * 2 + chroma_idx + 1] = U_val;
+            inference_frame_[y * inference_frame_width_ * 2 + chroma_idx + 3] = V_val;
           }
         }
       }
       // Draw vertical lines
       for (int x : {x1, x2}) {
-        if (x >= 0 && x < snapshot_width) {
-          int start_y = std::clamp(std::min(y1, y2), 0, snapshot_height - 1);
-          int end_y = std::clamp(std::max(y1, y2), 0, snapshot_height - 1);
+        if (x >= 0 && x < static_cast<int>(inference_frame_width_)) {
+          int start_y = std::clamp(std::min(y1, y2), 0,
+                                   static_cast<int>(inference_frame_height_) - 1);
+          int end_y = std::clamp(std::max(y1, y2), 0,
+                                 static_cast<int>(inference_frame_height_) - 1);
           for (int y = start_y; y <= end_y; ++y) {
-            yuyv_buf[y * snapshot_width * 2 + x * 2] = Y_val;
+            inference_frame_[y * inference_frame_width_ * 2 + x * 2] = Y_val;
             int chroma_idx = (x / 2) * 4;
-            yuyv_buf[y * snapshot_width * 2 + chroma_idx + 1] = U_val;
-            yuyv_buf[y * snapshot_width * 2 + chroma_idx + 3] = V_val;
+            inference_frame_[y * inference_frame_width_ * 2 + chroma_idx + 1] = U_val;
+            inference_frame_[y * inference_frame_width_ * 2 + chroma_idx + 3] = V_val;
           }
         }
       }
     }
 
-    update_debug_frame(yuyv_buf, snapshot_width, snapshot_height, max_score);
-    heap_caps_free(yuyv_buf);
+    update_debug_frame(inference_frame_.data(), inference_frame_width_,
+                       inference_frame_height_, max_score);
     return results;
   }
 
   if (!impl_) {
     ESP_LOGW(TAG, "Hardware Pedestrian Detect is not initialized or running in Mock "
                   "camera mode.");
-    update_debug_frame(yuyv_buf, snapshot_width, snapshot_height, 0.0f);
-    heap_caps_free(yuyv_buf);
+    update_debug_frame(inference_frame_.data(), inference_frame_width_,
+                       inference_frame_height_, 0.0f);
     return results;
   }
 
@@ -191,22 +191,22 @@ PedestrianDetect::detect(const vigo::camera::CameraFrame &frame) {
   impl_->set_score_thr(confidence_threshold_);
 
   // Prepare input image descriptor for ESP-DL
-  dl::image::img_t src_img = {.data = yuyv_buf,
-                              .width = static_cast<uint16_t>(snapshot_width),
-                              .height = static_cast<uint16_t>(snapshot_height),
+  dl::image::img_t src_img = {.data = inference_frame_.data(),
+                              .width = static_cast<uint16_t>(inference_frame_width_),
+                              .height = static_cast<uint16_t>(inference_frame_height_),
                               .pix_type = dl::image::DL_IMAGE_PIX_TYPE_YUYV};
 
-  // Run the Espressif ESP-DL inference pipeline
+  // Run the ESP-DL inference pipeline
   std::list<dl::detect::result_t> &results_list = impl_->run(src_img);
 
   float max_score = 0.0f;
   for (const auto &res : results_list) {
     if (res.score >= confidence_threshold_) {
       vigo::backend::DetectionResult det;
-      float x_min = static_cast<float>(res.box[0]) / snapshot_width;
-      float y_min = static_cast<float>(res.box[1]) / snapshot_height;
-      float x_max = static_cast<float>(res.box[2]) / snapshot_width;
-      float y_max = static_cast<float>(res.box[3]) / snapshot_height;
+      float x_min = static_cast<float>(res.box[0]) / inference_frame_width_;
+      float y_min = static_cast<float>(res.box[1]) / inference_frame_height_;
+      float x_max = static_cast<float>(res.box[2]) / inference_frame_width_;
+      float y_max = static_cast<float>(res.box[3]) / inference_frame_height_;
 
       det.box = {x_min, y_min, x_max, y_max};
       det.score = res.score;
@@ -222,46 +222,50 @@ PedestrianDetect::detect(const vigo::camera::CameraFrame &frame) {
     }
   }
 
-  // Draw bounding boxes on yuyv_buf for the debug frame
+  // Draw bounding boxes on inference_frame_ for the debug frame
   for (const auto &res : results) {
-    int x1 = static_cast<int>(res.box[0] * snapshot_width);
-    int y1 = static_cast<int>(res.box[1] * snapshot_height);
-    int x2 = static_cast<int>(res.box[2] * snapshot_width);
-    int y2 = static_cast<int>(res.box[3] * snapshot_height);
+    int x1 = static_cast<int>(res.box[0] * inference_frame_width_);
+    int y1 = static_cast<int>(res.box[1] * inference_frame_height_);
+    int x2 = static_cast<int>(res.box[2] * inference_frame_width_);
+    int y2 = static_cast<int>(res.box[3] * inference_frame_height_);
 
     uint8_t Y_val = 149;
     uint8_t U_val = 44;
     uint8_t V_val = 21;
 
     for (int y : {y1, y2}) {
-      if (y >= 0 && y < snapshot_height) {
-        int start_x = std::clamp(std::min(x1, x2), 0, snapshot_width - 1);
-        int end_x = std::clamp(std::max(x1, x2), 0, snapshot_width - 1);
+      if (y >= 0 && y < static_cast<int>(inference_frame_height_)) {
+        int start_x = std::clamp(std::min(x1, x2), 0,
+                                 static_cast<int>(inference_frame_width_) - 1);
+        int end_x = std::clamp(std::max(x1, x2), 0,
+                               static_cast<int>(inference_frame_width_) - 1);
         for (int x = start_x; x <= end_x; ++x) {
-          yuyv_buf[y * snapshot_width * 2 + x * 2] = Y_val;
+          inference_frame_[y * inference_frame_width_ * 2 + x * 2] = Y_val;
           int chroma_idx = (x / 2) * 4;
-          yuyv_buf[y * snapshot_width * 2 + chroma_idx + 1] = U_val;
-          yuyv_buf[y * snapshot_width * 2 + chroma_idx + 3] = V_val;
+          inference_frame_[y * inference_frame_width_ * 2 + chroma_idx + 1] = U_val;
+          inference_frame_[y * inference_frame_width_ * 2 + chroma_idx + 3] = V_val;
         }
       }
     }
     for (int x : {x1, x2}) {
-      if (x >= 0 && x < snapshot_width) {
-        int start_y = std::clamp(std::min(y1, y2), 0, snapshot_height - 1);
-        int end_y = std::clamp(std::max(y1, y2), 0, snapshot_height - 1);
+      if (x >= 0 && x < static_cast<int>(inference_frame_width_)) {
+        int start_y = std::clamp(std::min(y1, y2), 0,
+                                 static_cast<int>(inference_frame_height_) - 1);
+        int end_y = std::clamp(std::max(y1, y2), 0,
+                               static_cast<int>(inference_frame_height_) - 1);
         for (int y = start_y; y <= end_y; ++y) {
-          yuyv_buf[y * snapshot_width * 2 + x * 2] = Y_val;
+          inference_frame_[y * inference_frame_width_ * 2 + x * 2] = Y_val;
           int chroma_idx = (x / 2) * 4;
-          yuyv_buf[y * snapshot_width * 2 + chroma_idx + 1] = U_val;
-          yuyv_buf[y * snapshot_width * 2 + chroma_idx + 3] = V_val;
+          inference_frame_[y * inference_frame_width_ * 2 + chroma_idx + 1] = U_val;
+          inference_frame_[y * inference_frame_width_ * 2 + chroma_idx + 3] = V_val;
         }
       }
     }
   }
 
-  update_debug_frame(yuyv_buf, snapshot_width, snapshot_height, max_score);
+  update_debug_frame(inference_frame_.data(), inference_frame_width_,
+                     inference_frame_height_, max_score);
 
-  heap_caps_free(yuyv_buf);
   return results;
 }
 

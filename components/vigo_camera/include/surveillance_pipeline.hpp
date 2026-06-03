@@ -16,7 +16,8 @@ struct SurveillancePipelineResult {
 
 class SurveillancePipeline {
 public:
-  SurveillancePipeline(int motion_stride = 16, uint8_t motion_threshold = 8,
+  SurveillancePipeline(int frame_width, int frame_height, int motion_stride = 16,
+                       uint8_t motion_threshold = 8,
                        float motion_min_change_ratio = 0.05f,
                        uint32_t motion_cooldown_ms = 10000,
                        float pedestrian_confidence_threshold = 0.75f);
@@ -34,7 +35,7 @@ public:
 
 private:
   vigo::motion::MotionDetector motion_detector_;
-  vigo::detection::PedestrianDetect pedestrian_detector_;
+  vigo::detection::PedestrianDetector pedestrian_detector_;
 };
 
 } // namespace vigo::pipeline

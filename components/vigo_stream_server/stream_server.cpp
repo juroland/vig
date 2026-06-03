@@ -111,8 +111,8 @@ Expected<void> StreamServer::start(int port, SnapshotCallback snapshot_cb) {
     int width = 0;
     int height = 0;
     float probability = 0.0f;
-    vigo::detection::PedestrianDetect::get_debug_frame(yuyv_data, width, height,
-                                                       probability);
+    vigo::detection::PedestrianDetector::get_debug_frame(yuyv_data, width, height,
+                                                         probability);
 
     char json[64];
     snprintf(json, sizeof(json), "{\"probability\": %.4f}", probability);
@@ -136,8 +136,8 @@ Expected<void> StreamServer::start(int port, SnapshotCallback snapshot_cb) {
     int width = 0;
     int height = 0;
     float probability = 0.0f;
-    if (vigo::detection::PedestrianDetect::get_debug_frame(yuyv_data, width, height,
-                                                           probability)) {
+    if (vigo::detection::PedestrianDetector::get_debug_frame(yuyv_data, width, height,
+                                                             probability)) {
       if (self->jpeg_engine_) {
         jpeg_encode_cfg_t enc_cfg = {};
         enc_cfg.width = width;

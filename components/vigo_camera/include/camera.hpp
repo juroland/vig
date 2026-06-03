@@ -1,8 +1,8 @@
 #ifndef VIGO_CAMERA_CAMERA_HPP
 #define VIGO_CAMERA_CAMERA_HPP
 
-#include "aligned_allocator.hpp"
 #include "error_types.hpp"
+#include "memory.hpp"
 #include <cstdint>
 #include <cstring>
 #include <memory>

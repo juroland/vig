@@ -1,9 +1,9 @@
 #ifndef VIGO_H264_ENCODER_HPP
 #define VIGO_H264_ENCODER_HPP
 
-#include "aligned_allocator.hpp"
 #include "error_types.hpp"
 #include "esp_h264_enc_single_hw.h"
+#include "memory.hpp"
 #include <cstdint>
 #include <memory>
 #include <vector>

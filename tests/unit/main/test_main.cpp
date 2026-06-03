@@ -24,6 +24,8 @@ TEST_CASE("1. Short-circuit on NO motion", "[pipeline]") {
   ESP_LOGI(TAG, "Running Test 1: Short-circuit on NO motion");
 
   vigo::pipeline::SurveillancePipeline pipeline(
+      64,   // frame_width
+      64,   // frame_height
       4,    // stride
       4,    // threshold
       0.01f,// min change ratio
@@ -39,7 +41,7 @@ TEST_CASE("1. Short-circuit on NO motion", "[pipeline]") {
   pipeline.process(frame1);
 
   // Process identical frame: should return false for motion and bail early
-  vigo::detection::PedestrianDetect::set_simulated_pedestrian_present(true); // Even if pedestrian is present, we shouldn't scan
+  vigo::detection::PedestrianDetector::set_simulated_pedestrian_present(true); // Even if pedestrian is present, we shouldn't scan
   auto result = pipeline.process(frame2);
 
   TEST_ASSERT_FALSE_MESSAGE(result.motion_detected, "Motion should NOT have been detected");
@@ -51,6 +53,8 @@ TEST_CASE("2. Motion detected but NO human", "[pipeline]") {
   ESP_LOGI(TAG, "Running Test 2: Motion detected but NO human");
 
   vigo::pipeline::SurveillancePipeline pipeline(
+      64,   // frame_width
+      64,   // frame_height
       4,    // stride
       4,    // threshold
       0.01f,// min change ratio
@@ -64,7 +68,7 @@ TEST_CASE("2. Motion detected but NO human", "[pipeline]") {
   pipeline.process(frame1);
 
   // Configure pedestrian detector to return no match
-  vigo::detection::PedestrianDetect::set_simulated_pedestrian_present(false);
+  vigo::detection::PedestrianDetector::set_simulated_pedestrian_present(false);
 
   auto result = pipeline.process(frame2);
 
@@ -77,6 +81,8 @@ TEST_CASE("3. Motion and pedestrian detected (successful dispatch)", "[pipeline]
   ESP_LOGI(TAG, "Running Test 3: Motion and pedestrian detected");
 
   vigo::pipeline::SurveillancePipeline pipeline(
+      64,   // frame_width
+      64,   // frame_height
       4,    // stride
       4,    // threshold
       0.01f,// min change ratio
@@ -90,8 +96,8 @@ TEST_CASE("3. Motion and pedestrian detected (successful dispatch)", "[pipeline]
   pipeline.process(frame1);
 
   // Configure pedestrian detector to return high-confidence match
-  vigo::detection::PedestrianDetect::set_simulated_pedestrian_present(true);
-  vigo::detection::PedestrianDetect::set_simulated_score(0.85f);
+  vigo::detection::PedestrianDetector::set_simulated_pedestrian_present(true);
+  vigo::detection::PedestrianDetector::set_simulated_score(0.85f);
 
   auto result = pipeline.process(frame2);
 

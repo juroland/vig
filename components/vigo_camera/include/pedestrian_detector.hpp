@@ -1,12 +1,12 @@
 #pragma once
 
 #include "camera.hpp"
+#include "memory.hpp"
 #include "vigo_backend.hpp"
 #include <mutex>
 #include <vector>
 
-// Forward declare the ESP-DL PedestrianDetect class to keep compilation fast and
-// decoupling high.
+// ESP pedestrian_detect
 class PedestrianDetect;
 
 namespace vigo::detection {
@@ -19,12 +19,12 @@ struct DebugFrame {
   bool has_frame{false};
 };
 
-class PedestrianDetect {
+class PedestrianDetector {
 public:
-  explicit PedestrianDetect(float confidence_threshold = 0.75f);
-  ~PedestrianDetect();
+  explicit PedestrianDetector(int frame_width, int frame_height,
+                              float confidence_threshold = 0.75f);
+  ~PedestrianDetector();
 
-  // Run the detection inference on the frame buffer.
   std::vector<vigo::backend::DetectionResult>
   detect(const vigo::camera::CameraFrame &frame);
 
@@ -36,15 +36,24 @@ public:
   static bool get_debug_frame(std::vector<uint8_t> &yuyv_out, int &width_out,
                               int &height_out, float &probability_out);
 
-  // Simulation & Mocking Controls for testing and interactive dashboards
+  // Simulation & Mocking Controls
   static void set_simulated_pedestrian_present(bool present) {
     sim_pedestrian_present_ = present;
   }
   static void set_simulated_score(float score) { sim_score_ = score; }
 
 private:
-  float confidence_threshold_;
   ::PedestrianDetect *impl_{nullptr};
+
+  float confidence_threshold_;
+  size_t input_frame_height_;
+  size_t input_frame_width_;
+
+  // Downscaled input frame for inference
+  size_t inference_frame_height_;
+  size_t inference_frame_width_;
+  size_t inference_frame_bytes_;
+  std::vector<uint8_t, vigo::memory::AlignedPsramAllocator<uint8_t>> inference_frame_;
 
   static inline std::mutex debug_mutex_;
   static inline DebugFrame debug_frame_;

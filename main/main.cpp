@@ -82,6 +82,15 @@ public:
     if (motion_upload_task_handle_) {
       vTaskDelete(motion_upload_task_handle_);
     }
+    if (detection_task_handle_) {
+      vTaskDelete(detection_task_handle_);
+    }
+    if (detection_idle_sem_) {
+      vSemaphoreDelete(detection_idle_sem_);
+    }
+    if (detection_start_sem_) {
+      vSemaphoreDelete(detection_start_sem_);
+    }
     if (motion_queue_) {
       MotionEventPayload *payload = nullptr;
       while (xQueueReceive(motion_queue_, &payload, 0) == pdTRUE) {
@@ -158,6 +167,22 @@ public:
       return std::unexpected(DeviceError::InternalError);
     }
 
+    ESP_LOGI(TAG, "Initializing Detection Semaphores and Buffers...");
+    detection_idle_sem_ = xSemaphoreCreateBinary();
+    detection_start_sem_ = xSemaphoreCreateBinary();
+    if (!detection_idle_sem_ || !detection_start_sem_) {
+      ESP_LOGE(TAG, "Failed to create detection semaphores");
+      return std::unexpected(DeviceError::InternalError);
+    }
+    xSemaphoreGive(detection_idle_sem_);
+
+    size_t frame_bytes = config::CAMERA_WIDTH * config::CAMERA_HEIGHT * 3 / 2;
+    detection_buffer_.resize(frame_bytes);
+    detection_frame_.data.set_external_buffer(detection_buffer_.data(), detection_buffer_.size());
+
+    telemetry_buffer_.resize(frame_bytes);
+    latest_frame_.data.set_external_buffer(telemetry_buffer_.data(), telemetry_buffer_.size());
+
     ESP_LOGI(TAG, "Device initialized successfully.");
     return {};
   }
@@ -177,6 +202,11 @@ public:
     xTaskCreatePinnedToCore(
         [](void *arg) { static_cast<Device *>(arg)->motion_upload_task(); },
         "motion_upload", 8192, this, 2, &motion_upload_task_handle_, 0);
+
+    // Start background detection task on Core 0
+    xTaskCreatePinnedToCore(
+        [](void *arg) { static_cast<Device *>(arg)->detection_task(); },
+        "detection_task", 16384, this, 4, &detection_task_handle_, 0);
 
     while (true) {
       vTaskDelay(pdMS_TO_TICKS(1000));
@@ -200,11 +230,23 @@ private:
   TaskHandle_t telemetry_task_handle_ = nullptr;
 
   // Cascading Inference Pipeline
-  pipeline::SurveillancePipeline surveillance_pipeline_{
-      config::MOTION_STRIDE, config::MOTION_THRESHOLD, config::MOTION_MIN_CHANGE_RATIO,
-      config::MOTION_COOLDOWN_MS, 0.75f};
+  pipeline::SurveillancePipeline surveillance_pipeline_{config::CAMERA_WIDTH,
+                                                        config::CAMERA_HEIGHT,
+                                                        config::MOTION_STRIDE,
+                                                        config::MOTION_THRESHOLD,
+                                                        config::MOTION_MIN_CHANGE_RATIO,
+                                                        config::MOTION_COOLDOWN_MS,
+                                                        0.75f};
   QueueHandle_t motion_queue_ = nullptr;
   TaskHandle_t motion_upload_task_handle_ = nullptr;
+
+  // Asynchronous Detection members
+  SemaphoreHandle_t detection_idle_sem_ = nullptr;
+  SemaphoreHandle_t detection_start_sem_ = nullptr;
+  TaskHandle_t detection_task_handle_ = nullptr;
+  std::vector<uint8_t, vigo::memory::AlignedPsramAllocator<uint8_t>> detection_buffer_;
+  camera::CameraFrame detection_frame_;
+  std::vector<uint8_t, vigo::memory::AlignedPsramAllocator<uint8_t>> telemetry_buffer_;
 
   // Thread-safe shared frame for telemetry collector
   std::mutex latest_frame_mutex_;
@@ -236,6 +278,7 @@ private:
         wait_cycles++;
       }
 
+      std::vector<uint8_t, vigo::memory::AlignedPsramAllocator<uint8_t>> local_telemetry_buf;
       camera::CameraFrame frame_copy;
       bool got_frame = false;
       {
@@ -243,7 +286,9 @@ private:
         if (has_latest_frame_) {
           frame_copy.width = latest_frame_.width;
           frame_copy.height = latest_frame_.height;
-          frame_copy.data.assign(latest_frame_.data.begin(), latest_frame_.data.end());
+          local_telemetry_buf.resize(latest_frame_.data.size());
+          std::memcpy(local_telemetry_buf.data(), latest_frame_.data.data(), latest_frame_.data.size());
+          frame_copy.data.set_external_buffer(local_telemetry_buf.data(), local_telemetry_buf.size());
           has_latest_frame_ = false; // Reset flag for next demand cycle
           got_frame = true;
         }
@@ -330,6 +375,37 @@ private:
     }
   }
 
+  void detection_task() {
+    ESP_LOGI(TAG, "Detection task started on core %d", xPortGetCoreID());
+    esp_task_wdt_add(nullptr);
+
+    while (true) {
+      esp_task_wdt_reset();
+      if (xSemaphoreTake(detection_start_sem_, portMAX_DELAY) == pdTRUE) {
+        esp_task_wdt_reset();
+
+        auto pipeline_res = surveillance_pipeline_.process(detection_frame_);
+        if (pipeline_res.pedestrian_confirmed) {
+          auto telemetry_data = telemetry_collector_->collect(&detection_frame_);
+          if (!telemetry_data.snapshot.empty()) {
+            auto *payload = new MotionEventPayload{std::move(telemetry_data.snapshot),
+                                                   std::move(pipeline_res.detections)};
+            if (xQueueSend(motion_queue_, &payload, 0) != pdTRUE) {
+              ESP_LOGW(TAG, "Motion upload queue full, dropping event");
+              delete payload;
+            }
+          }
+        } else if (pipeline_res.motion_detected) {
+          ESP_LOGI(
+              TAG,
+              "Motion detected but no pedestrian confirmed; skipping backend upload");
+        }
+
+        xSemaphoreGive(detection_idle_sem_);
+      }
+    }
+  }
+
   void camera_task() {
     ESP_LOGI(TAG, "Camera task started on core %d", xPortGetCoreID());
     esp_task_wdt_add(nullptr);
@@ -345,27 +421,12 @@ private:
         continue;
       }
 
-      // Run the cascading surveillance pipeline on the frame
-      auto pipeline_res = surveillance_pipeline_.process(*frame_res);
-      if (pipeline_res.pedestrian_confirmed) {
-        // ONLY when a pedestrian is confirmed, we serialize and push metadata to queue
-        auto telemetry_data = telemetry_collector_->collect(&(*frame_res));
-        if (!telemetry_data.snapshot.empty()) {
-          auto *payload = new MotionEventPayload{std::move(telemetry_data.snapshot),
-                                                 std::move(pipeline_res.detections)};
-          if (xQueueSend(motion_queue_, &payload, 0) != pdTRUE) {
-            ESP_LOGW(TAG, "Motion upload queue full, dropping event");
-            delete payload;
-          }
-        }
-      } else if (pipeline_res.motion_detected) {
-        ESP_LOGI(
-            TAG,
-            "Motion detected but no pedestrian confirmed; skipping backend upload");
-      } else {
-        // Guard / Filter short-circuit: delay to save CPU cycles when there is no
-        // activity
-        vTaskDelay(pdMS_TO_TICKS(100));
+      // Non-blocking handoff to the detection task if it is idle
+      if (xSemaphoreTake(detection_idle_sem_, 0) == pdTRUE) {
+        detection_frame_.width = frame_res->width;
+        detection_frame_.height = frame_res->height;
+        std::memcpy(detection_buffer_.data(), frame_res->data.data(), frame_res->data.size());
+        xSemaphoreGive(detection_start_sem_);
       }
 
       uint64_t current_pts = esp_timer_get_time() / 1000;
@@ -381,7 +442,7 @@ private:
           std::lock_guard<std::mutex> lock(latest_frame_mutex_);
           latest_frame_.width = frame_res->width;
           latest_frame_.height = frame_res->height;
-          latest_frame_.data.assign(frame_res->data.begin(), frame_res->data.end());
+          std::memcpy(telemetry_buffer_.data(), frame_res->data.data(), frame_res->data.size());
           has_latest_frame_ = true;
           request_telemetry_snapshot_ = false; // Done copying, reset request flag
         }

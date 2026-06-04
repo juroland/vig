@@ -178,10 +178,12 @@ public:
 
     size_t frame_bytes = config::CAMERA_WIDTH * config::CAMERA_HEIGHT * 3 / 2;
     detection_buffer_.resize(frame_bytes);
-    detection_frame_.data.set_external_buffer(detection_buffer_.data(), detection_buffer_.size());
+    detection_frame_.data.set_external_buffer(detection_buffer_.data(),
+                                              detection_buffer_.size());
 
     telemetry_buffer_.resize(frame_bytes);
-    latest_frame_.data.set_external_buffer(telemetry_buffer_.data(), telemetry_buffer_.size());
+    latest_frame_.data.set_external_buffer(telemetry_buffer_.data(),
+                                           telemetry_buffer_.size());
 
     ESP_LOGI(TAG, "Device initialized successfully.");
     return {};
@@ -278,7 +280,8 @@ private:
         wait_cycles++;
       }
 
-      std::vector<uint8_t, vigo::memory::AlignedPsramAllocator<uint8_t>> local_telemetry_buf;
+      std::vector<uint8_t, vigo::memory::AlignedPsramAllocator<uint8_t>>
+          local_telemetry_buf;
       camera::CameraFrame frame_copy;
       bool got_frame = false;
       {
@@ -287,8 +290,10 @@ private:
           frame_copy.width = latest_frame_.width;
           frame_copy.height = latest_frame_.height;
           local_telemetry_buf.resize(latest_frame_.data.size());
-          std::memcpy(local_telemetry_buf.data(), latest_frame_.data.data(), latest_frame_.data.size());
-          frame_copy.data.set_external_buffer(local_telemetry_buf.data(), local_telemetry_buf.size());
+          std::memcpy(local_telemetry_buf.data(), latest_frame_.data.data(),
+                      latest_frame_.data.size());
+          frame_copy.data.set_external_buffer(local_telemetry_buf.data(),
+                                              local_telemetry_buf.size());
           has_latest_frame_ = false; // Reset flag for next demand cycle
           got_frame = true;
         }
@@ -425,7 +430,8 @@ private:
       if (xSemaphoreTake(detection_idle_sem_, 0) == pdTRUE) {
         detection_frame_.width = frame_res->width;
         detection_frame_.height = frame_res->height;
-        std::memcpy(detection_buffer_.data(), frame_res->data.data(), frame_res->data.size());
+        std::memcpy(detection_buffer_.data(), frame_res->data.data(),
+                    frame_res->data.size());
         xSemaphoreGive(detection_start_sem_);
       }
 
@@ -442,7 +448,8 @@ private:
           std::lock_guard<std::mutex> lock(latest_frame_mutex_);
           latest_frame_.width = frame_res->width;
           latest_frame_.height = frame_res->height;
-          std::memcpy(telemetry_buffer_.data(), frame_res->data.data(), frame_res->data.size());
+          std::memcpy(telemetry_buffer_.data(), frame_res->data.data(),
+                      frame_res->data.size());
           has_latest_frame_ = true;
           request_telemetry_snapshot_ = false; // Done copying, reset request flag
         }

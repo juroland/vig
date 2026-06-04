@@ -79,3 +79,9 @@ test-backend-run:
 
 test-unit-build:
 	cd tests/unit && idf.py set-target esp32p4 && idf.py build
+
+test-unit-flash:
+	cd tests/unit && idf.py -p $(PORT) flash
+
+test-unit-monitor:
+	cd tests/unit && idf.py -p $(PORT) monitor

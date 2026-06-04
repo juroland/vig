@@ -11,11 +11,12 @@ SurveillancePipeline::SurveillancePipeline(int frame_width, int frame_height,
                                            int motion_stride, uint8_t motion_threshold,
                                            float motion_min_change_ratio,
                                            uint32_t motion_cooldown_ms,
-                                           float pedestrian_confidence_threshold)
+                                           float pedestrian_confidence_threshold,
+                                           int pedestrian_downscale_factor)
     : motion_detector_(motion_stride, motion_threshold, motion_min_change_ratio,
                        motion_cooldown_ms),
-      pedestrian_detector_(frame_width, frame_height, pedestrian_confidence_threshold) {
-}
+      pedestrian_detector_(frame_width, frame_height, pedestrian_confidence_threshold,
+                           pedestrian_downscale_factor) {}
 
 SurveillancePipelineResult
 SurveillancePipeline::process(const vigo::camera::CameraFrame &frame) {

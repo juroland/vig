@@ -2,6 +2,7 @@
 #include "esp_log.h"
 #include "sdkconfig.h"
 #include <algorithm>
+#include <cassert>
 
 // Include the official Espressif pedestrian detect
 #include "pedestrian_detect.hpp"
@@ -11,19 +12,31 @@ static const char *TAG = "PedestrianDetector";
 namespace vigo::detection {
 
 PedestrianDetector::PedestrianDetector(int frame_width, int frame_height,
-                                       float confidence_threshold)
-    : confidence_threshold_{confidence_threshold},
+                                       float confidence_threshold, int downscale_factor)
+    : confidence_threshold_{confidence_threshold}, downscale_factor_{downscale_factor},
       input_frame_height_{static_cast<size_t>(frame_height)},
       input_frame_width_{static_cast<size_t>(frame_width)},
-      inference_frame_height_{static_cast<size_t>(frame_height / 2)},
-      inference_frame_width_{static_cast<size_t>(frame_width / 2)},
+      inference_frame_height_{static_cast<size_t>(frame_height / downscale_factor)},
+      inference_frame_width_{static_cast<size_t>(frame_width / downscale_factor)},
       inference_frame_bytes_{inference_frame_width_ * inference_frame_height_ * 2},
       inference_frame_(inference_frame_bytes_) {
+  assert(downscale_factor == 2 || downscale_factor == 4);
+
+  // For downscale factors > 2, we need an intermediate buffer for two-stage
+  // conversion: OUYY_EVYY → YUYV at 2x, then YUYV → YUYV at remaining factor.
+  if (downscale_factor_ > 2) {
+    size_t half_w = input_frame_width_ / 2;
+    size_t half_h = input_frame_height_ / 2;
+    intermediate_frame_.resize(half_w * half_h * 2);
+  }
+
 #ifndef CONFIG_VIGO_USE_MOCK_CAMERA
   ESP_LOGI(TAG, "Initializing hardware PedestrianDetect pico_s8_v1 model...");
   impl_ = new ::PedestrianDetect(::PedestrianDetect::PICO_S8_V1,
                                  true); // lazy_load = true
 #endif
+  ESP_LOGI(TAG, "Inference resolution: %zu x %zu (downscale factor: %d)",
+           inference_frame_width_, inference_frame_height_, downscale_factor_);
 }
 
 PedestrianDetector::~PedestrianDetector() {
@@ -33,10 +46,12 @@ PedestrianDetector::~PedestrianDetector() {
   }
 }
 
-// Static helper to convert ESP32 proprietary OUYY_EVYY (Espressif YUV420) to YUV422
+namespace detail {
+
+// Convert ESP32 proprietary OUYY_EVYY (Espressif YUV420) to YUV422
 // interleaved (YUYV) format, applying 2x2 software binning (downscaling).
-static void convert_ouyy_evyy_to_yuyv_binned(const uint8_t *src, uint8_t *dst,
-                                             int original_width, int original_height) {
+void convert_ouyy_evyy_to_yuyv_binned(const uint8_t *src, uint8_t *dst,
+                                      int original_width, int original_height) {
   int src_stride = original_width * 3 / 2; // 1.5 bytes per pixel
   int out_width = original_width / 2;
   int out_height = original_height / 2;
@@ -74,6 +89,46 @@ static void convert_ouyy_evyy_to_yuyv_binned(const uint8_t *src, uint8_t *dst,
   }
 }
 
+// Downsample YUYV interleaved frame by 2x in both dimensions.
+// Averages 2x2 pixel blocks, producing (width/2, height/2) output.
+void downsample_yuyv_2x(const uint8_t *src, uint8_t *dst, int src_width,
+                        int src_height) {
+  int dst_width = src_width / 2;
+  int dst_height = src_height / 2;
+
+  for (int y = 0; y < dst_height; y++) {
+    const uint8_t *row0 = src + (y * 2) * src_width * 2;
+    const uint8_t *row1 = src + (y * 2 + 1) * src_width * 2;
+    uint8_t *dst_row = dst + y * dst_width * 2;
+
+    for (int x = 0; x < dst_width; x += 2) {
+      int sx = x * 2;
+      // YUYV macro-pixel: [Y0 U Y1 V]
+      // Average Y from 2x2 block of source pixels
+      uint8_t y0 = (row0[sx * 2 + 0] + row0[(sx + 1) * 2 + 0] + row1[sx * 2 + 0] +
+                    row1[(sx + 1) * 2 + 0]) /
+                   4;
+      uint8_t y1 = (row0[(sx + 2) * 2 + 0] + row0[(sx + 3) * 2 + 0] +
+                    row1[(sx + 2) * 2 + 0] + row1[(sx + 3) * 2 + 0]) /
+                   4;
+      // Average U and V from neighboring macro-pixels
+      uint8_t u = (row0[sx * 2 + 1] + row0[(sx + 2) * 2 + 1] + row1[sx * 2 + 1] +
+                   row1[(sx + 2) * 2 + 1]) /
+                  4;
+      uint8_t v = (row0[sx * 2 + 3] + row0[(sx + 2) * 2 + 3] + row1[sx * 2 + 3] +
+                   row1[(sx + 2) * 2 + 3]) /
+                  4;
+
+      dst_row[x * 2 + 0] = y0;
+      dst_row[x * 2 + 1] = u;
+      dst_row[x * 2 + 2] = y1;
+      dst_row[x * 2 + 3] = v;
+    }
+  }
+}
+
+} // namespace detail
+
 void PedestrianDetector::update_debug_frame(const uint8_t *yuyv, int width, int height,
                                             float probability) {
   std::lock_guard<std::mutex> lock(debug_mutex_);
@@ -106,8 +161,22 @@ std::vector<vigo::backend::DetectionResult>
 PedestrianDetector::detect(const vigo::camera::CameraFrame &frame) {
   std::vector<vigo::backend::DetectionResult> results;
 
-  convert_ouyy_evyy_to_yuyv_binned(frame.data.data(), inference_frame_.data(),
-                                   input_frame_width_, input_frame_height_);
+  // Stage 1: Convert OUYY_EVYY → YUYV with inherent 2x2 binning (always half-res)
+  if (downscale_factor_ <= 2) {
+    // Single-stage: output directly to inference buffer
+    detail::convert_ouyy_evyy_to_yuyv_binned(frame.data.data(), inference_frame_.data(),
+                                             input_frame_width_, input_frame_height_);
+  } else {
+    // Two-stage: convert to intermediate half-res, then downsample further
+    detail::convert_ouyy_evyy_to_yuyv_binned(frame.data.data(),
+                                             intermediate_frame_.data(),
+                                             input_frame_width_, input_frame_height_);
+    // Stage 2: Downsample YUYV by remaining factor (2x for total 4x)
+    int half_w = input_frame_width_ / 2;
+    int half_h = input_frame_height_ / 2;
+    detail::downsample_yuyv_2x(intermediate_frame_.data(), inference_frame_.data(),
+                               half_w, half_h);
+  }
 
   // Under mock/testing settings
   if (sim_pedestrian_present_) {

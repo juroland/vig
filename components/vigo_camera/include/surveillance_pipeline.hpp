@@ -20,7 +20,8 @@ public:
                        uint8_t motion_threshold = 8,
                        float motion_min_change_ratio = 0.05f,
                        uint32_t motion_cooldown_ms = 10000,
-                       float pedestrian_confidence_threshold = 0.75f);
+                       float pedestrian_confidence_threshold = 0.75f,
+                       int pedestrian_downscale_factor = 4);
   ~SurveillancePipeline() = default;
 
   // Process a captured camera frame through the cascading pipeline.

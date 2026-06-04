@@ -147,25 +147,40 @@ Expected<void> StreamServer::start(int port, SnapshotCallback snapshot_cb) {
         enc_cfg.image_quality = 80;
         enc_cfg.pixel_reverse = true;
 
+        size_t inbuf_size = yuyv_data.size();
+        jpeg_encode_memory_alloc_cfg_t in_mem_cfg = {};
+        in_mem_cfg.buffer_direction = JPEG_ENC_ALLOC_INPUT_BUFFER;
+        size_t actual_in_size = 0;
+        uint8_t *inbuf = static_cast<uint8_t *>(
+            jpeg_alloc_encoder_mem(inbuf_size, &in_mem_cfg, &actual_in_size));
+
         size_t outbuf_size = width * height;
         jpeg_encode_memory_alloc_cfg_t mem_cfg = {};
         mem_cfg.buffer_direction = JPEG_ENC_ALLOC_OUTPUT_BUFFER;
         size_t actual_out_size = 0;
         uint8_t *outbuf = static_cast<uint8_t *>(
             jpeg_alloc_encoder_mem(outbuf_size, &mem_cfg, &actual_out_size));
-        if (outbuf) {
+
+        if (inbuf && outbuf) {
+          memcpy(inbuf, yuyv_data.data(), inbuf_size);
           uint32_t out_size = 0;
-          esp_err_t err = jpeg_encoder_process(self->jpeg_engine_, &enc_cfg,
-                                               yuyv_data.data(), yuyv_data.size(),
-                                               outbuf, actual_out_size, &out_size);
+          esp_err_t err =
+              jpeg_encoder_process(self->jpeg_engine_, &enc_cfg, inbuf, inbuf_size,
+                                   outbuf, actual_out_size, &out_size);
           if (err == ESP_OK && out_size > 0) {
             httpd_resp_set_type(req, "image/jpeg");
             httpd_resp_set_hdr(req, "Cache-Control",
                                "no-cache, no-store, must-revalidate");
             esp_err_t ret = httpd_resp_send(req, (const char *)outbuf, out_size);
+            heap_caps_free(inbuf);
             heap_caps_free(outbuf);
             return ret;
           }
+        }
+        if (inbuf) {
+          heap_caps_free(inbuf);
+        }
+        if (outbuf) {
           heap_caps_free(outbuf);
         }
       }

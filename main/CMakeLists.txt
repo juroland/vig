@@ -16,6 +16,8 @@ idf_component_register(
     vigo_backend
     vigo_telemetry
     vigo_whip
+    vigo_ota
+    vigo_factory
 )
 
 # Inject the version string into the main component during build phase

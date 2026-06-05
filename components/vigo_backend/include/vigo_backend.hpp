@@ -4,6 +4,7 @@
 #include "vigo_telemetry.hpp"
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace vigo::backend {
@@ -17,6 +18,7 @@ struct DetectionResult {
 struct HeartbeatResponse {
   bool ack{false};
   bool update_available{false};
+  std::string update_version{};
   std::string stream_token{};
   std::string whip_url{};
 };
@@ -31,7 +33,9 @@ public:
   BackendClient &operator=(const BackendClient &) = delete;
 
   Expected<HeartbeatResponse>
-  send_heartbeat(const vigo::telemetry::TelemetryData &telemetry);
+  send_heartbeat(const vigo::telemetry::TelemetryData &telemetry,
+                 std::string_view firmware_version,
+                 std::string_view ota_status = "IDLE", std::string_view ota_error = "");
 
   Expected<void> send_offline();
 

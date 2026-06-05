@@ -1,6 +1,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 
+#include "esp_ota_ops.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -11,10 +12,13 @@
 #include "camera.hpp"
 #include "device_config.hpp"
 #include "error_types.hpp"
+#include "mbedtls/base64.h"
 #include "net.hpp"
 #include "stream_server.hpp"
 #include "surveillance_pipeline.hpp"
 #include "vigo_backend.hpp"
+#include "vigo_factory.hpp"
+#include "vigo_ota.hpp"
 #include "vigo_telemetry.hpp"
 #include "vigo_whip.hpp"
 
@@ -31,6 +35,15 @@ struct MotionEventPayload {
   std::string base64_jpeg;
   std::vector<backend::DetectionResult> detections;
 };
+
+static std::string der_to_pem(const std::vector<uint8_t> &der) {
+  size_t out_len = 0;
+  mbedtls_base64_encode(nullptr, 0, &out_len, der.data(), der.size());
+  std::vector<unsigned char> buf(out_len + 1);
+  mbedtls_base64_encode(buf.data(), buf.size(), &out_len, der.data(), der.size());
+  std::string b64(reinterpret_cast<char *>(buf.data()), out_len);
+  return "-----BEGIN EC PRIVATE KEY-----\n" + b64 + "\n-----END EC PRIVATE KEY-----\n";
+}
 
 static std::string extract_host(std::string_view url) {
   size_t scheme_pos = url.find("://");
@@ -108,7 +121,50 @@ public:
 
   Expected<void> start() {
     ESP_LOGI(TAG, "Starting device initialization...");
-    ESP_LOGI(TAG, "Initializing NVS...");
+    ESP_LOGI(TAG, "Firmware version: %s",
+             std::string(config::FIRMWARE_VERSION).c_str());
+
+    ESP_LOGI(TAG, "Initializing Factory NVS Partition...");
+    esp_err_t err = factory::init_factory_partition();
+    if (err != ESP_OK) {
+      ESP_LOGE(TAG, "Factory NVS partition init failed: %s (0x%x)",
+               esp_err_to_name(err), err);
+      return std::unexpected(DeviceError::InternalError);
+    }
+
+    err = factory::get_hardware_id(hardware_id_);
+    if (err != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to load hardware_id from factory partition: %s (0x%x)",
+               esp_err_to_name(err), err);
+      return std::unexpected(DeviceError::InternalError);
+    }
+    ESP_LOGI(TAG, "Loaded Hardware ID: %s", hardware_id_.c_str());
+
+    err = factory::get_device_token(device_token_);
+    if (err != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to load device_token from factory partition: %s (0x%x)",
+               esp_err_to_name(err), err);
+      return std::unexpected(DeviceError::InternalError);
+    }
+
+    err = factory::get_dtls_cert(dtls_cert_pem_);
+    if (err != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to load dtls_cert from factory partition: %s (0x%x)",
+               esp_err_to_name(err), err);
+      return std::unexpected(DeviceError::InternalError);
+    }
+
+    std::vector<uint8_t> dtls_key_der;
+    err = factory::get_dtls_key(dtls_key_der);
+    if (err != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to load dtls_key from factory partition: %s (0x%x)",
+               esp_err_to_name(err), err);
+      return std::unexpected(DeviceError::InternalError);
+    }
+
+    dtls_key_pem_ = der_to_pem(dtls_key_der);
+
+    ESP_LOGI(TAG, "Initializing standard NVS...");
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
       ESP_ERROR_CHECK(nvs_flash_erase());
@@ -155,8 +211,11 @@ public:
 
     ESP_LOGI(TAG, "Initializing Backend Client...");
     backend_client_ = std::make_unique<backend::BackendClient>(
-        std::string(config::API_BASE_URL), std::string(config::HARDWARE_ID),
-        std::string(config::DEVICE_TOKEN));
+        std::string(config::API_BASE_URL), hardware_id_, device_token_);
+
+    ESP_LOGI(TAG, "Initializing OTA Updater...");
+    ota_updater_ = std::make_unique<ota::FirmwareUpdater>(
+        config::API_BASE_URL, device_token_, hardware_id_, config::FIRMWARE_VERSION);
 
     telemetry_collector_ = std::make_unique<telemetry::TelemetryCollector>(*camera_);
 
@@ -184,6 +243,15 @@ public:
     telemetry_buffer_.resize(frame_bytes);
     latest_frame_.data.set_external_buffer(telemetry_buffer_.data(),
                                            telemetry_buffer_.size());
+
+    // Run system self-test for boot validation and rollback protection
+    if (run_system_self_test()) {
+      ESP_LOGI(TAG, "Self-test succeeded. Marking app as valid.");
+      esp_ota_mark_app_valid_cancel_rollback();
+    } else {
+      ESP_LOGE(TAG, "Self-test failed. Marking app as invalid and rolling back.");
+      esp_ota_mark_app_invalid_rollback_and_reboot();
+    }
 
     ESP_LOGI(TAG, "Device initialized successfully.");
     return {};
@@ -216,12 +284,69 @@ public:
   }
 
 private:
+  std::string hardware_id_;
+  std::string device_token_;
+  std::string dtls_cert_pem_;
+  std::string dtls_key_pem_;
+
+  bool run_system_self_test() {
+    ESP_LOGI(TAG, "Running system self-test...");
+
+    // 1. Verify Camera is operational
+    if (!camera_) {
+      ESP_LOGE(TAG, "Self-test failed: Camera not instantiated");
+      return false;
+    }
+
+    auto frame_res = camera_->capture();
+    if (!frame_res) {
+      ESP_LOGE(TAG, "Self-test failed: Camera capture failed");
+      return false;
+    }
+    ESP_LOGI(TAG, "Self-test: Camera verified OK");
+
+    // 2. Verify Network connectivity (wait up to 15 seconds)
+    ESP_LOGI(TAG, "Self-test: Waiting for network connection...");
+    int retries = 0;
+    while (!net::NetworkManager::instance().is_connected() && retries < 15) {
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      retries++;
+    }
+
+    if (!net::NetworkManager::instance().is_connected()) {
+      ESP_LOGE(TAG, "Self-test failed: Network connection timeout");
+      return false;
+    }
+    ESP_LOGI(TAG, "Self-test: Network verified OK");
+
+    // 3. Verify Backend connectivity
+    if (!backend_client_) {
+      ESP_LOGE(TAG, "Self-test failed: Backend client not instantiated");
+      return false;
+    }
+
+    ESP_LOGI(TAG, "Self-test: Verifying backend connectivity...");
+    telemetry::TelemetryData test_data;
+    auto hb_res = backend_client_->send_heartbeat(test_data, config::FIRMWARE_VERSION,
+                                                  "testing", "");
+    if (!hb_res) {
+      ESP_LOGE(TAG, "Self-test failed: Backend connection failed: %s",
+               to_string(hb_res.error()).data());
+      return false;
+    }
+    ESP_LOGI(TAG, "Self-test: Backend connection verified OK");
+
+    ESP_LOGI(TAG, "System self-test PASSED!");
+    return true;
+  }
+
   std::unique_ptr<camera::CameraManager> camera_;
   camera::H264Encoder encoder_;
   net::StreamServer stream_server_;
 
   // Connectivity
   std::unique_ptr<backend::BackendClient> backend_client_;
+  std::unique_ptr<ota::FirmwareUpdater> ota_updater_;
   std::unique_ptr<telemetry::TelemetryCollector> telemetry_collector_;
 
   std::mutex whip_mutex_;
@@ -239,7 +364,7 @@ private:
       config::MOTION_THRESHOLD,
       config::MOTION_MIN_CHANGE_RATIO,
       config::MOTION_COOLDOWN_MS,
-      0.75f,
+      config::PEDESTRIAN_CLASSIFICATION_THRESHOLD,
       4,
       config::PEDESTRIAN_MAX_AREA_PROPORTION,
       config::PEDESTRIAN_MIN_ASPECT_RATIO,
@@ -312,8 +437,14 @@ private:
         latest_snapshot_ = telemetry_data.raw_jpeg;
       }
 
-      ESP_LOGI(TAG, "Posting heartbeat to backend...");
-      auto hb_res = backend_client_->send_heartbeat(telemetry_data);
+      // Determine OTA status string for the heartbeat payload
+      auto ota_status = ota::to_status_string(ota_updater_->status());
+      auto &ota_error = ota_updater_->last_error();
+
+      ESP_LOGI(TAG, "Posting heartbeat to backend (OTA: %.*s)...",
+               (int)ota_status.size(), ota_status.data());
+      auto hb_res = backend_client_->send_heartbeat(
+          telemetry_data, config::FIRMWARE_VERSION, ota_status, ota_error);
       if (!hb_res) {
         ESP_LOGE(TAG, "Heartbeat request failed: %.*s",
                  (int)to_string(hb_res.error()).size(),
@@ -323,6 +454,35 @@ private:
         ESP_LOGI(TAG, "Heartbeat ACK received. Stream Token size: %zu",
                  hb.stream_token.length());
 
+        // ── OTA Update Handling ──
+        if (hb.update_available && !hb.update_version.empty()) {
+          ESP_LOGI(TAG, "OTA update available: v%s", hb.update_version.c_str());
+
+          // Only attempt if we are currently idle (not mid-update)
+          if (ota_updater_->status() == ota::OtaStatus::Idle ||
+              ota_updater_->status() == ota::OtaStatus::Failed) {
+            auto check_res = ota_updater_->check_for_update();
+            if (check_res && check_res->available) {
+              auto apply_res = ota_updater_->apply_update(*check_res);
+              if (apply_res) {
+                // Report SUCCESS before rebooting
+                backend_client_->send_heartbeat(
+                    telemetry_data, config::FIRMWARE_VERSION,
+                    ota::to_status_string(ota::OtaStatus::Success), "");
+                ESP_LOGI(TAG, "OTA successful — rebooting in 2 seconds...");
+                vTaskDelay(pdMS_TO_TICKS(2000));
+                esp_restart();
+              } else {
+                ESP_LOGE(TAG, "OTA apply failed: %s",
+                         ota_updater_->last_error().c_str());
+              }
+            } else if (!check_res) {
+              ESP_LOGE(TAG, "OTA check request failed");
+            }
+          }
+        }
+
+        // ── WHIP Streaming ──
         std::string target_whip_url;
         std::string api_host = extract_host(config::API_BASE_URL);
         target_whip_url = sanitize_whip_url(hb.whip_url, api_host);
@@ -353,8 +513,7 @@ private:
             }
 
             whip_publisher_ = std::make_unique<whip::WhipPublisher>(
-                target_whip_url, hb.stream_token, std::string(config::DTLS_CERT_PEM),
-                std::string(config::DTLS_KEY_PEM));
+                target_whip_url, hb.stream_token, dtls_cert_pem_, dtls_key_pem_);
             auto start_res = whip_publisher_->start();
             if (!start_res) {
               ESP_LOGE(TAG, "Failed to start WHIP publisher: %.*s",

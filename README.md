@@ -29,31 +29,103 @@ make flash monitor PORT=/dev/ttyUSB0
 
 ---
 
-## Device Provisioning & Configuration
+## Decoupled Firmware OTA & Manufacturing Provisioning Framework
 
-VIG requires specific environment configurations and cryptographic credentials to publish secure live video via WebRTC (WHIP). 
+To optimize continuous deployment, VIG firmware binaries are completely identical and generic across all hardware units. Unique identities, authentication tokens, and stream encryption keys reside in an isolated, immutable factory data partition (`fct_nvs`) that persists across application updates.
 
-For in-depth educational explanations, protocol flow charts, and cryptographic analyses (including why UDP/DTLS dictate this design, public key structures, and trust-anchors), consult the **[VIG Technical & Cryptographic Protocol Handbook](file:///home/juroland/Repositories/juroland/vig/HANDBOOK.md)**.
+For in-depth explanations, protocol flow charts, and cryptographic analyses, consult the **[VIG Technical & Cryptographic Protocol Handbook](file:///home/juroland/Repositories/juroland/vig/HANDBOOK.md)**.
 
-### Configuration Parameters Overview
+### Provisioning Parameters (Factory Partition)
 
-1. **`CONFIG_VIGO_DEVICE_TOKEN` (Device Authentication)**:
-   The unique long-lived static bearer token configured on the device. It authenticates control plane HTTPS signaling/heartbeats (e.g. `Bearer <TOKEN>`) to dynamically obtain single-use session tokens from the backend.
-2. **`CONFIG_VIGO_DTLS_CERT_PEM` & `CONFIG_VIGO_DTLS_KEY_PEM` (Stream Encryption)**:
-   The device-specific self-signed certificate and ECDSA private key. These secure the P2P UDP video stream via **DTLS-SRTP** on-the-fly, utilizing SDP fingerprint matching without backend database storage.
+The isolated read-only `fct_nvs` partition stores the following device-specific parameters:
+*   `hardware_id` (string): The unique hardware identifier.
+*   `device_token` (string): The unique long-lived static bearer token for backend API authentication.
+*   `dtls_cert` (string): Self-signed X.509 certificate in PEM format for DTLS-SRTP.
+*   `dtls_key` (binary): Secure ECDSA private key (secp256r1/prime256v1) in binary DER format.
 
 ---
 
-### Generating Unique Device Keys
+### Manufacturing Automation & Production Flashing
 
-We provide an automated helper to generate a unique cryptographically secure `secp256r1` (prime256v1) elliptic curve private key and self-signed certificate, format them correctly, and inject them into a specific device defaults profile:
+The manufacturing workflow utilizes device defaults configuration files (e.g. `configs/jr.defaults`) to extract parameters and keys. This keeps the compiled app firmware entirely generic.
 
+#### 1. Generate DTLS Key & Certificate
+Generates a new secure `secp256r1` private key and self-signed certificate, formatting them and saving them inside the device defaults configuration file:
 ```bash
-# Generate and inject unique keys for a specific device profile (e.g. configs/jr.defaults)
 make generate-keys DEVICE=jr
-
-# Then build the firmware for that specific device
-make build DEVICE=jr
 ```
 
-This updates the respective `<device_name>.defaults` file with the custom `CONFIG_VIGO_DTLS_CERT_PEM` and `CONFIG_VIGO_DTLS_KEY_PEM` configuration options, completely overriding the insecure shared fallbacks.
+#### 2. Generate Factory Blob
+Pulls `CONFIG_VIGO_HARDWARE_ID`, `CONFIG_VIGO_DEVICE_TOKEN`, and the DTLS certificate/key from `configs/jr.defaults` to compile the read-only NVS partition binary (`build/factory_mfg.bin`):
+```bash
+make generate-factory-blob DEVICE=jr
+```
+*(Alternatively, you can generate a sandbox factory blob manually using command-line arguments: `make generate-factory-blob HARDWARE_ID=VIGO-DEV-001 DEVICE_TOKEN=my_secure_token`)*
+
+#### 3. Production Flash
+Compiles the generic application firmware, generates the factory blob for the specified device defaults config, flashes all system code partitions (bootloader, partition table, active app partition), and writes the factory blob to offset `0x12000` in a single execution step:
+```bash
+make production-flash DEVICE=jr PORT=/dev/ttyUSB0
+```
+
+---
+
+## Firmware Versioning & OTA Releases
+
+The firmware version is the single source of truth for OTA updates. It lives in `version.txt` and follows [SemVer](https://semver.org/) (`MAJOR.MINOR.PATCH`).
+
+### Bumping the Version
+Use the Makefile targets to increment the version:
+```bash
+# Show current version
+make version
+
+# Patch bump: 1.2.3 → 1.2.4 (bug fixes, minor changes)
+make bump-patch
+
+# Minor bump: 1.2.3 → 1.3.0 (new features, backward-compatible)
+make bump-minor
+
+# Major bump: 1.2.3 → 2.0.0 (breaking changes)
+make bump-major
+
+# Dev suffix bump: 1.2.3 → 1.2.3-dev.1 (or 1.2.3-dev.1 → 1.2.3-dev.2)
+make bump-dev
+
+# Promotion to release: 1.2.3-dev.2 → 1.2.3 (strips suffix)
+make bump-release
+```
+
+### Building an OTA Release
+```bash
+make ota-export
+# Output: release/vigo-x.y.z.bin
+```
+
+### Automated Validation Lifecycle & Rollback Protection
+
+To prevent bricking during OTA deployments, VIG implements an automated validation lifecycle:
+1. **Boot Verification**: On boot, the system invokes `run_system_self_test()`.
+2. **Self-Test Criteria**:
+   * **Camera Check**: Captures a test frame to ensure image sensor is operational.
+   * **Network Check**: Waits up to 15 seconds for a Wi-Fi or Ethernet connection.
+   * **Backend Check**: Sends a diagnostic heartbeat request to verify API connection.
+3. **Commit or Rollback**:
+   * **Success**: If all checks pass, the firmware calls `esp_ota_mark_app_valid_cancel_rollback()` to commit the new firmware partition.
+   * **Failure/Crash**: If the self-test fails or the system crashes before completion, the bootloader automatically rolls back to the previous working slot and reboots.
+
+---
+
+## Partition Layout
+
+The device uses a dual-OTA layout mapped to the 32 MB flash with an isolated factory provisioning partition:
+
+| Partition | Type | SubType | Offset | Size | Purpose |
+|-----------|------|---------|--------|------|---------|
+| `nvs` | data | nvs | `0x9000` | 24 KB | Standard writable NVS storage (dynamic state) |
+| `phy_init` | data | phy | `0xf000` | 4 KB | PHY initialization parameters |
+| `otadata` | data | ota | `0x10000` | 8 KB | Tracks which OTA slot is active |
+| `fct_nvs` | data | nvs | `0x12000` | 16 KB | Factory provisioning storage (read-only) |
+| `ota_0` | app | ota_0 | `0x20000` | 8 MB | OTA firmware partition slot 0 |
+| `ota_1` | app | ota_1 | - | 8 MB | OTA firmware partition slot 1 |
+| `storage` | data | spiffs | - | 14 MB | Local media storage (SPIFFS) |

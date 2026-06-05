@@ -111,4 +111,25 @@ menu "VIG Device Configuration"
         help
             The minimum time between motion detection events.
 
+    config VIGO_PEDESTRIAN_MAX_AREA_PROPORTION
+        float "Max bounding box area proportion"
+        default 0.70
+        help
+            The maximum fraction of the total image area a pedestrian bounding box can cover.
+            Detections exceeding this threshold are discarded.
+
+    config VIGO_PEDESTRIAN_MIN_ASPECT_RATIO
+        float "Min bounding box aspect ratio (width/height)"
+        default 0.10
+        help
+            The minimum aspect ratio (width / height) of a pedestrian bounding box.
+            Set to 0.0 to disable aspect ratio minimum filtering.
+
+    config VIGO_PEDESTRIAN_MAX_ASPECT_RATIO
+        float "Max bounding box aspect ratio (width/height)"
+        default 1.00
+        help
+            The maximum aspect ratio (width / height) of a pedestrian bounding box.
+            Set to 0.0 to disable aspect ratio maximum filtering.
+
 endmenu

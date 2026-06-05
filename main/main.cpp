@@ -232,13 +232,18 @@ private:
   TaskHandle_t telemetry_task_handle_ = nullptr;
 
   // Cascading Inference Pipeline
-  pipeline::SurveillancePipeline surveillance_pipeline_{config::CAMERA_WIDTH,
-                                                        config::CAMERA_HEIGHT,
-                                                        config::MOTION_STRIDE,
-                                                        config::MOTION_THRESHOLD,
-                                                        config::MOTION_MIN_CHANGE_RATIO,
-                                                        config::MOTION_COOLDOWN_MS,
-                                                        0.75f};
+  pipeline::SurveillancePipeline surveillance_pipeline_{
+      config::CAMERA_WIDTH,
+      config::CAMERA_HEIGHT,
+      config::MOTION_STRIDE,
+      config::MOTION_THRESHOLD,
+      config::MOTION_MIN_CHANGE_RATIO,
+      config::MOTION_COOLDOWN_MS,
+      0.75f,
+      4,
+      config::PEDESTRIAN_MAX_AREA_PROPORTION,
+      config::PEDESTRIAN_MIN_ASPECT_RATIO,
+      config::PEDESTRIAN_MAX_ASPECT_RATIO};
   QueueHandle_t motion_queue_ = nullptr;
   TaskHandle_t motion_upload_task_handle_ = nullptr;
 

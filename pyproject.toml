@@ -12,7 +12,8 @@ test = [
     "pytest-embedded-idf>=1.11.0",
     "pytest-embedded-serial-esp>=1.11.0",
     "fastapi>=0.111.0",
-    "uvicorn>=0.30.0"
+    "uvicorn>=0.30.0",
+    "pillow>=12.2.0",
 ]
 
 [tool.setuptools]

@@ -12,8 +12,12 @@ static const char *TAG = "PedestrianDetector";
 namespace vigo::detection {
 
 PedestrianDetector::PedestrianDetector(int frame_width, int frame_height,
-                                       float confidence_threshold, int downscale_factor)
+                                       float confidence_threshold, int downscale_factor,
+                                       float max_area_proportion,
+                                       float min_aspect_ratio, float max_aspect_ratio)
     : confidence_threshold_{confidence_threshold}, downscale_factor_{downscale_factor},
+      max_area_proportion_{max_area_proportion}, min_aspect_ratio_{min_aspect_ratio},
+      max_aspect_ratio_{max_aspect_ratio},
       input_frame_height_{static_cast<size_t>(frame_height)},
       input_frame_width_{static_cast<size_t>(frame_width)},
       inference_frame_height_{static_cast<size_t>(frame_height / downscale_factor)},
@@ -158,7 +162,11 @@ bool PedestrianDetector::get_debug_frame(std::vector<uint8_t> &yuyv_out, int &wi
 }
 
 std::vector<vigo::backend::DetectionResult>
-PedestrianDetector::detect(const vigo::camera::CameraFrame &frame) {
+PedestrianDetector::detect(const vigo::camera::CameraFrame &frame,
+                           bool *has_discarded) {
+  if (has_discarded) {
+    *has_discarded = false;
+  }
   std::vector<vigo::backend::DetectionResult> results;
 
   // Stage 1: Convert OUYY_EVYY → YUYV with inherent 2x2 binning (always half-res)
@@ -182,17 +190,27 @@ PedestrianDetector::detect(const vigo::camera::CameraFrame &frame) {
   if (sim_pedestrian_present_) {
     float max_score = 0.0f;
     if (sim_score_ >= confidence_threshold_) {
-      vigo::backend::DetectionResult det;
-      det.box = {0.25f, 0.20f, 0.65f,
-                 0.85f}; // [x_min, y_min, x_max, y_max] normalized coordinates
-      det.score = sim_score_;
-      det.label = "pedestrian";
-      results.push_back(std::move(det));
-      max_score = sim_score_;
-      ESP_LOGI(
-          TAG,
-          "Simulated Pedestrian Detected! BBox=[0.25, 0.20, 0.65, 0.85], Score=%.2f",
-          sim_score_);
+      float x_min = sim_box_[0];
+      float y_min = sim_box_[1];
+      float x_max = sim_box_[2];
+      float y_max = sim_box_[3];
+      if (should_keep_detection(x_min, y_min, x_max, y_max, sim_score_)) {
+        vigo::backend::DetectionResult det;
+        det.box = {x_min, y_min, x_max, y_max};
+        det.score = sim_score_;
+        det.label = "pedestrian";
+        results.push_back(std::move(det));
+        max_score = sim_score_;
+        ESP_LOGI(
+            TAG,
+            "Simulated Pedestrian Detected! BBox=[%.2f, %.2f, %.2f, %.2f], Score=%.2f",
+            x_min, y_min, x_max, y_max, sim_score_);
+      } else {
+        ESP_LOGD(TAG, "Simulated detection discarded by filters");
+        if (has_discarded) {
+          *has_discarded = true;
+        }
+      }
     } else {
       ESP_LOGD(TAG, "Inference completed: No pedestrian detected (Simulated)");
     }
@@ -271,23 +289,29 @@ PedestrianDetector::detect(const vigo::camera::CameraFrame &frame) {
   float max_score = 0.0f;
   for (const auto &res : results_list) {
     if (res.score >= confidence_threshold_) {
-      vigo::backend::DetectionResult det;
       float x_min = static_cast<float>(res.box[0]) / inference_frame_width_;
       float y_min = static_cast<float>(res.box[1]) / inference_frame_height_;
       float x_max = static_cast<float>(res.box[2]) / inference_frame_width_;
       float y_max = static_cast<float>(res.box[3]) / inference_frame_height_;
 
-      det.box = {x_min, y_min, x_max, y_max};
-      det.score = res.score;
-      det.label = "pedestrian";
-      results.push_back(std::move(det));
+      if (should_keep_detection(x_min, y_min, x_max, y_max, res.score)) {
+        vigo::backend::DetectionResult det;
+        det.box = {x_min, y_min, x_max, y_max};
+        det.score = res.score;
+        det.label = "pedestrian";
+        results.push_back(std::move(det));
 
-      if (res.score > max_score) {
-        max_score = res.score;
+        if (res.score > max_score) {
+          max_score = res.score;
+        }
+
+        ESP_LOGI(TAG, "Pedestrian Detected! BBox=[%.2f, %.2f, %.2f, %.2f], Score=%.2f",
+                 x_min, y_min, x_max, y_max, res.score);
+      } else {
+        if (has_discarded) {
+          *has_discarded = true;
+        }
       }
-
-      ESP_LOGI(TAG, "Pedestrian Detected! BBox=[%.2f, %.2f, %.2f, %.2f], Score=%.2f",
-               x_min, y_min, x_max, y_max, res.score);
     }
   }
 
@@ -336,6 +360,42 @@ PedestrianDetector::detect(const vigo::camera::CameraFrame &frame) {
                      inference_frame_height_, max_score);
 
   return results;
+}
+
+bool PedestrianDetector::should_keep_detection(float x_min, float y_min, float x_max,
+                                               float y_max, float score) const {
+  float w = x_max - x_min;
+  float h = y_max - y_min;
+  if (w <= 0.0f || h <= 0.0f) {
+    return false;
+  }
+  float area = w * h;
+  float aspect_ratio = w / h;
+
+  if (area > max_area_proportion_) {
+    ESP_LOGI(TAG,
+             "Discarded pedestrian detection (score=%.2f) due to area: %.3f > %.3f",
+             score, area, max_area_proportion_);
+    return false;
+  }
+
+  if (min_aspect_ratio_ > 0.0f && aspect_ratio < min_aspect_ratio_) {
+    ESP_LOGI(TAG,
+             "Discarded pedestrian detection (score=%.2f) due to aspect ratio (too "
+             "narrow): %.3f < %.3f",
+             score, aspect_ratio, min_aspect_ratio_);
+    return false;
+  }
+
+  if (max_aspect_ratio_ > 0.0f && aspect_ratio > max_aspect_ratio_) {
+    ESP_LOGI(TAG,
+             "Discarded pedestrian detection (score=%.2f) due to aspect ratio (too "
+             "wide): %.3f > %.3f",
+             score, aspect_ratio, max_aspect_ratio_);
+    return false;
+  }
+
+  return true;
 }
 
 } // namespace vigo::detection

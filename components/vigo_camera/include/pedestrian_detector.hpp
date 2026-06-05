@@ -39,14 +39,26 @@ class PedestrianDetector {
 public:
   explicit PedestrianDetector(int frame_width, int frame_height,
                               float confidence_threshold = 0.75f,
-                              int downscale_factor = 4);
+                              int downscale_factor = 4,
+                              float max_area_proportion = 0.70f,
+                              float min_aspect_ratio = 0.10f,
+                              float max_aspect_ratio = 1.00f);
   ~PedestrianDetector();
 
   std::vector<vigo::backend::DetectionResult>
-  detect(const vigo::camera::CameraFrame &frame);
+  detect(const vigo::camera::CameraFrame &frame, bool *has_discarded = nullptr);
 
   void set_threshold(float threshold) { confidence_threshold_ = threshold; }
   float get_threshold() const { return confidence_threshold_; }
+
+  void set_max_area_proportion(float prop) { max_area_proportion_ = prop; }
+  float get_max_area_proportion() const { return max_area_proportion_; }
+
+  void set_min_aspect_ratio(float ratio) { min_aspect_ratio_ = ratio; }
+  float get_min_aspect_ratio() const { return min_aspect_ratio_; }
+
+  void set_max_aspect_ratio(float ratio) { max_aspect_ratio_ = ratio; }
+  float get_max_aspect_ratio() const { return max_aspect_ratio_; }
 
   static void update_debug_frame(const uint8_t *yuyv, int width, int height,
                                  float probability);
@@ -58,12 +70,21 @@ public:
     sim_pedestrian_present_ = present;
   }
   static void set_simulated_score(float score) { sim_score_ = score; }
+  static void set_simulated_box(float x_min, float y_min, float x_max, float y_max) {
+    sim_box_ = {x_min, y_min, x_max, y_max};
+  }
 
 private:
+  bool should_keep_detection(float x_min, float y_min, float x_max, float y_max,
+                             float score) const;
+
   ::PedestrianDetect *impl_{nullptr};
 
   float confidence_threshold_;
   int downscale_factor_;
+  float max_area_proportion_;
+  float min_aspect_ratio_;
+  float max_aspect_ratio_;
   size_t input_frame_height_;
   size_t input_frame_width_;
 
@@ -82,6 +103,7 @@ private:
 
   static inline bool sim_pedestrian_present_{false};
   static inline float sim_score_{0.85f};
+  static inline std::vector<float> sim_box_{0.25f, 0.20f, 0.65f, 0.85f};
 };
 
 } // namespace vigo::detection

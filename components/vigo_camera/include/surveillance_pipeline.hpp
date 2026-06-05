@@ -21,7 +21,10 @@ public:
                        float motion_min_change_ratio = 0.05f,
                        uint32_t motion_cooldown_ms = 10000,
                        float pedestrian_confidence_threshold = 0.75f,
-                       int pedestrian_downscale_factor = 4);
+                       int pedestrian_downscale_factor = 4,
+                       float pedestrian_max_area_proportion = 0.70f,
+                       float pedestrian_min_aspect_ratio = 0.10f,
+                       float pedestrian_max_aspect_ratio = 1.00f);
   ~SurveillancePipeline() = default;
 
   // Process a captured camera frame through the cascading pipeline.
@@ -32,6 +35,27 @@ public:
   }
   float get_pedestrian_threshold() const {
     return pedestrian_detector_.get_threshold();
+  }
+
+  void set_pedestrian_max_area_proportion(float prop) {
+    pedestrian_detector_.set_max_area_proportion(prop);
+  }
+  float get_pedestrian_max_area_proportion() const {
+    return pedestrian_detector_.get_max_area_proportion();
+  }
+
+  void set_pedestrian_min_aspect_ratio(float ratio) {
+    pedestrian_detector_.set_min_aspect_ratio(ratio);
+  }
+  float get_pedestrian_min_aspect_ratio() const {
+    return pedestrian_detector_.get_min_aspect_ratio();
+  }
+
+  void set_pedestrian_max_aspect_ratio(float ratio) {
+    pedestrian_detector_.set_max_aspect_ratio(ratio);
+  }
+  float get_pedestrian_max_aspect_ratio() const {
+    return pedestrian_detector_.get_max_aspect_ratio();
   }
 
 private:

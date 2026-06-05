@@ -7,6 +7,8 @@
 #include "pedestrian_detector.hpp"
 #include "camera.hpp"
 #include "driver/jpeg_encode.h"
+#include "pedestrian_image.h"
+#include "non_pedestrian_image.h"
 #include <string>
 
 static const char *TAG = "TestPipelineUnit";
@@ -325,6 +327,111 @@ TEST_CASE("8. JPEG encoding of downscaled 320x240 frame", "[pipeline]") {
   TEST_ASSERT_GREATER_THAN(0, out_size);
 }
 
+TEST_CASE("9. Pedestrian classification - True Positive (Pedestrian)", "[pipeline]") {
+  ESP_LOGI(TAG, "Running Test 9: Pedestrian classification - True Positive");
+
+  vigo::detection::PedestrianDetector detector(448, 448, 0.75f, 2);
+  vigo::detection::PedestrianDetector::set_simulated_pedestrian_present(false);
+
+  vigo::camera::CameraFrame frame;
+  frame.width = 448;
+  frame.height = 448;
+  frame.data.set_external_buffer(pedestrian_image_data, sizeof(pedestrian_image_data));
+
+  auto results = detector.detect(frame);
+
+  // Assert we found a pedestrian
+  TEST_ASSERT_GREATER_THAN(0, results.size());
+  bool found_pedestrian = false;
+  for (const auto &res : results) {
+    if (res.label == "pedestrian") {
+      found_pedestrian = true;
+      ESP_LOGI(TAG, "Found true positive pedestrian with score: %.2f", res.score);
+    }
+  }
+  TEST_ASSERT_TRUE(found_pedestrian);
+}
+
+TEST_CASE("10. Pedestrian classification - True Negative (Non-pedestrian)", "[pipeline]") {
+  ESP_LOGI(TAG, "Running Test 10: Pedestrian classification - True Negative");
+
+  vigo::detection::PedestrianDetector detector(448, 448, 0.75f, 2);
+  vigo::detection::PedestrianDetector::set_simulated_pedestrian_present(false);
+
+  vigo::camera::CameraFrame frame;
+  frame.width = 448;
+  frame.height = 448;
+  frame.data.set_external_buffer(non_pedestrian_image_data, sizeof(non_pedestrian_image_data));
+
+  auto results = detector.detect(frame);
+
+  // Assert no pedestrian was found
+  TEST_ASSERT_TRUE(results.empty());
+}
+
+TEST_CASE("11. Pedestrian classification - Area and aspect ratio filtering", "[pipeline]") {
+  ESP_LOGI(TAG, "Running Test 11: Area and aspect ratio filtering");
+
+  // Reset/configure simulated pedestrian
+  vigo::detection::PedestrianDetector::set_simulated_pedestrian_present(true);
+  vigo::detection::PedestrianDetector::set_simulated_score(0.85f);
+
+  // 11a: Normal box (not filtered)
+  {
+    vigo::pipeline::SurveillancePipeline pipeline(64, 64, 4, 4, 0.01f, 1000, 0.75f, 4, 0.70f, 0.10f, 1.00f);
+    vigo::detection::PedestrianDetector::set_simulated_box(0.25f, 0.20f, 0.65f, 0.85f); // area = 0.26, aspect_ratio = 0.615
+    auto frame1 = create_mock_frame(100);
+    pipeline.process(frame1);
+    auto frame2 = create_mock_frame(200);
+    auto result = pipeline.process(frame2);
+    TEST_ASSERT_TRUE(result.motion_detected);
+    TEST_ASSERT_TRUE(result.pedestrian_confirmed);
+    TEST_ASSERT_EQUAL(1, result.detections.size());
+  }
+
+  // 11b: Large box (exceeding max area proportion)
+  {
+    vigo::pipeline::SurveillancePipeline pipeline(64, 64, 4, 4, 0.01f, 1000, 0.75f, 4, 0.50f, 0.10f, 1.00f);
+    vigo::detection::PedestrianDetector::set_simulated_box(0.10f, 0.10f, 0.90f, 0.90f); // area = 0.64, aspect_ratio = 1.00
+    auto frame1 = create_mock_frame(100);
+    pipeline.process(frame1);
+    auto frame2 = create_mock_frame(200);
+    auto result = pipeline.process(frame2);
+    TEST_ASSERT_TRUE(result.motion_detected);
+    TEST_ASSERT_TRUE(result.pedestrian_confirmed); // Pedestrian detected, so send even if discarded
+    TEST_ASSERT_TRUE(result.detections.empty());    // Detections empty
+  }
+
+  // 11c: Horizontal box (invalid aspect ratio)
+  {
+    vigo::pipeline::SurveillancePipeline pipeline(64, 64, 4, 4, 0.01f, 1000, 0.75f, 4, 0.70f, 0.10f, 1.00f);
+    vigo::detection::PedestrianDetector::set_simulated_box(0.10f, 0.40f, 0.90f, 0.60f); // area = 0.16, aspect_ratio = 4.00
+    auto frame1 = create_mock_frame(100);
+    pipeline.process(frame1);
+    auto frame2 = create_mock_frame(200);
+    auto result = pipeline.process(frame2);
+    TEST_ASSERT_TRUE(result.motion_detected);
+    TEST_ASSERT_TRUE(result.pedestrian_confirmed); // Pedestrian detected, so send even if discarded
+    TEST_ASSERT_TRUE(result.detections.empty());    // Detections empty
+  }
+
+  // 11d: Narrow vertical box (invalid aspect ratio)
+  {
+    vigo::pipeline::SurveillancePipeline pipeline(64, 64, 4, 4, 0.01f, 1000, 0.75f, 4, 0.70f, 0.10f, 1.00f);
+    vigo::detection::PedestrianDetector::set_simulated_box(0.45f, 0.10f, 0.47f, 0.90f); // area = 0.016, aspect_ratio = 0.025
+    auto frame1 = create_mock_frame(100);
+    pipeline.process(frame1);
+    auto frame2 = create_mock_frame(200);
+    auto result = pipeline.process(frame2);
+    TEST_ASSERT_TRUE(result.motion_detected);
+    TEST_ASSERT_TRUE(result.pedestrian_confirmed); // Pedestrian detected, so send even if discarded
+    TEST_ASSERT_TRUE(result.detections.empty());    // Detections empty
+  }
+
+  // Reset simulated state
+  vigo::detection::PedestrianDetector::set_simulated_pedestrian_present(false);
+}
+
 extern "C" void app_main(void) {
   vTaskDelay(pdMS_TO_TICKS(1000));
   UNITY_BEGIN();
@@ -336,5 +443,8 @@ extern "C" void app_main(void) {
   unity_run_test_by_name("6. PedestrianDetector downscale factor instantiation");
   unity_run_test_by_name("7. downsample_yuyv_2x larger unit test (8x4 -> 4x2)");
   unity_run_test_by_name("8. JPEG encoding of downscaled 320x240 frame");
+  unity_run_test_by_name("9. Pedestrian classification - True Positive (Pedestrian)");
+  unity_run_test_by_name("10. Pedestrian classification - True Negative (Non-pedestrian)");
+  unity_run_test_by_name("11. Pedestrian classification - Area and aspect ratio filtering");
   UNITY_END();
 }

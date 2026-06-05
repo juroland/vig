@@ -28,6 +28,13 @@ static vigo::camera::CameraFrame create_mock_frame(uint8_t pixel_value) {
   return frame;
 }
 
+// Helper to create a camera frame where the first half has base_value and the second half has motion_value
+static vigo::camera::CameraFrame create_mock_motion_frame(uint8_t base_value, uint8_t motion_value) {
+  vigo::camera::CameraFrame frame = create_mock_frame(base_value);
+  std::fill(frame.data.begin() + frame.data.size() / 2, frame.data.end(), motion_value);
+  return frame;
+}
+
 TEST_CASE("1. Short-circuit on NO motion", "[pipeline]") {
   ESP_LOGI(TAG, "Running Test 1: Short-circuit on NO motion");
 
@@ -73,7 +80,7 @@ TEST_CASE("2. Motion detected but NO human", "[pipeline]") {
   auto frame1 = create_mock_frame(100);
   pipeline.process(frame1);
 
-  auto frame2 = create_mock_frame(200); // Drastic pixel changes to trigger motion
+  auto frame2 = create_mock_motion_frame(100, 200); // Localized pixel changes to trigger motion
 
   // Configure pedestrian detector to return no match
   vigo::detection::PedestrianDetector::set_simulated_pedestrian_present(false);
@@ -101,7 +108,7 @@ TEST_CASE("3. Motion and pedestrian detected (successful dispatch)", "[pipeline]
   auto frame1 = create_mock_frame(100);
   pipeline.process(frame1);
 
-  auto frame2 = create_mock_frame(200);
+  auto frame2 = create_mock_motion_frame(100, 200);
 
   // Configure pedestrian detector to return high-confidence match
   vigo::detection::PedestrianDetector::set_simulated_pedestrian_present(true);
@@ -387,7 +394,7 @@ TEST_CASE("11. Pedestrian classification - Area and aspect ratio filtering", "[p
     vigo::detection::PedestrianDetector::set_simulated_box(0.25f, 0.20f, 0.65f, 0.85f); // area = 0.26, aspect_ratio = 0.615
     auto frame1 = create_mock_frame(100);
     pipeline.process(frame1);
-    auto frame2 = create_mock_frame(200);
+    auto frame2 = create_mock_motion_frame(100, 200);
     auto result = pipeline.process(frame2);
     TEST_ASSERT_TRUE(result.motion_detected);
     TEST_ASSERT_TRUE(result.pedestrian_confirmed);
@@ -400,7 +407,7 @@ TEST_CASE("11. Pedestrian classification - Area and aspect ratio filtering", "[p
     vigo::detection::PedestrianDetector::set_simulated_box(0.10f, 0.10f, 0.90f, 0.90f); // area = 0.64, aspect_ratio = 1.00
     auto frame1 = create_mock_frame(100);
     pipeline.process(frame1);
-    auto frame2 = create_mock_frame(200);
+    auto frame2 = create_mock_motion_frame(100, 200);
     auto result = pipeline.process(frame2);
     TEST_ASSERT_TRUE(result.motion_detected);
     TEST_ASSERT_TRUE(result.pedestrian_confirmed); // Pedestrian detected, so send even if discarded
@@ -413,7 +420,7 @@ TEST_CASE("11. Pedestrian classification - Area and aspect ratio filtering", "[p
     vigo::detection::PedestrianDetector::set_simulated_box(0.10f, 0.40f, 0.90f, 0.60f); // area = 0.16, aspect_ratio = 4.00
     auto frame1 = create_mock_frame(100);
     pipeline.process(frame1);
-    auto frame2 = create_mock_frame(200);
+    auto frame2 = create_mock_motion_frame(100, 200);
     auto result = pipeline.process(frame2);
     TEST_ASSERT_TRUE(result.motion_detected);
     TEST_ASSERT_TRUE(result.pedestrian_confirmed); // Pedestrian detected, so send even if discarded
@@ -426,7 +433,7 @@ TEST_CASE("11. Pedestrian classification - Area and aspect ratio filtering", "[p
     vigo::detection::PedestrianDetector::set_simulated_box(0.45f, 0.10f, 0.47f, 0.90f); // area = 0.016, aspect_ratio = 0.025
     auto frame1 = create_mock_frame(100);
     pipeline.process(frame1);
-    auto frame2 = create_mock_frame(200);
+    auto frame2 = create_mock_motion_frame(100, 200);
     auto result = pipeline.process(frame2);
     TEST_ASSERT_TRUE(result.motion_detected);
     TEST_ASSERT_TRUE(result.pedestrian_confirmed); // Pedestrian detected, so send even if discarded

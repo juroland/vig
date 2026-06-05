@@ -7,16 +7,34 @@
 static const char *TAG = "VigMotion";
 
 // Implement the get_moving_point_number algorithm matching the Espressif esp-dl
-// signature
+// signature, but with global illumination compensation
 namespace dl::image {
 uint32_t get_moving_point_number(const uint8_t *img1, const uint8_t *img2, int width,
                                  int height, int stride, uint8_t threshold) {
+  // First pass: compute average luminance change to compensate for global illumination
+  // changes/auto-exposure
+  int64_t diff_sum = 0;
+  uint32_t n_points = 0;
+  for (int i = 0; i < height; i += stride) {
+    for (int j = 0; j < width; j += stride) {
+      int idx = i * width + j;
+      diff_sum += static_cast<int>(img2[idx]) - static_cast<int>(img1[idx]);
+      n_points++;
+    }
+  }
+
+  int avg_diff = 0;
+  if (n_points > 0) {
+    avg_diff = static_cast<int>(diff_sum / n_points);
+  }
+
+  // Second pass: count moving points, compensating for the average difference
   uint32_t n_moving_pts = 0;
   for (int i = 0; i < height; i += stride) {
     for (int j = 0; j < width; j += stride) {
       int idx = i * width + j;
-      if (std::abs(static_cast<int>(img1[idx]) - static_cast<int>(img2[idx])) >
-          threshold) {
+      int diff = (static_cast<int>(img2[idx]) - static_cast<int>(img1[idx])) - avg_diff;
+      if (std::abs(diff) > threshold) {
         n_moving_pts++;
       }
     }

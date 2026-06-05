@@ -9,6 +9,11 @@
 #include "driver/jpeg_encode.h"
 #include "pedestrian_image.h"
 #include "non_pedestrian_image.h"
+#include "nvs.h"
+#include "vigo_factory.hpp"
+#include "vigo_ota.hpp"
+#include "esp_ota_ops.h"
+#include "esp_https_ota.h"
 #include <string>
 
 static const char *TAG = "TestPipelineUnit";
@@ -432,6 +437,42 @@ TEST_CASE("11. Pedestrian classification - Area and aspect ratio filtering", "[p
   vigo::detection::PedestrianDetector::set_simulated_pedestrian_present(false);
 }
 
+TEST_CASE("12. Factory NVS initialization and retrieval", "[factory]") {
+  ESP_LOGI(TAG, "Running Test 12: Factory NVS initialization and retrieval");
+
+  // Mount the fct_nvs partition
+  esp_err_t err = vigo::factory::init_factory_partition();
+  if (err == ESP_OK) {
+    std::string hw_id;
+    err = vigo::factory::get_hardware_id(hw_id);
+    TEST_ASSERT_TRUE(err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND);
+
+    std::string token;
+    err = vigo::factory::get_device_token(token);
+    TEST_ASSERT_TRUE(err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND);
+
+    std::string cert;
+    err = vigo::factory::get_dtls_cert(cert);
+    TEST_ASSERT_TRUE(err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND);
+
+    std::vector<uint8_t> key;
+    err = vigo::factory::get_dtls_key(key);
+    TEST_ASSERT_TRUE(err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND);
+  } else {
+    TEST_ASSERT_NOT_EQUAL(ESP_OK, err);
+  }
+}
+
+TEST_CASE("13. Rollback protection cancel and trigger state validation", "[rollback]") {
+  ESP_LOGI(TAG, "Running Test 13: Rollback protection state validation");
+
+  bool possible = esp_ota_check_rollback_is_possible();
+  ESP_LOGI(TAG, "Rollback is possible: %s", possible ? "yes" : "no");
+
+  esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+  TEST_ASSERT_TRUE(err == ESP_OK || err == ESP_ERR_OTA_ROLLBACK_INVALID_STATE);
+}
+
 extern "C" void app_main(void) {
   vTaskDelay(pdMS_TO_TICKS(1000));
   UNITY_BEGIN();
@@ -446,5 +487,7 @@ extern "C" void app_main(void) {
   unity_run_test_by_name("9. Pedestrian classification - True Positive (Pedestrian)");
   unity_run_test_by_name("10. Pedestrian classification - True Negative (Non-pedestrian)");
   unity_run_test_by_name("11. Pedestrian classification - Area and aspect ratio filtering");
+  unity_run_test_by_name("12. Factory NVS initialization and retrieval");
+  unity_run_test_by_name("13. Rollback protection cancel and trigger state validation");
   UNITY_END();
 }

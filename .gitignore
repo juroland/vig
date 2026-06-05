@@ -4,6 +4,7 @@
 build/
 build_clang/
 managed_components/
+release/
 sdkconfig.old
 sdkconfig
 
@@ -45,6 +46,7 @@ ehthumbs.db
 # ========================================
 configs/*.defaults
 configs/sdkconfig.*
+configs/*_template.csv
 
 # ========================================
 # Python

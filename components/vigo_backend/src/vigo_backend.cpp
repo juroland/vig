@@ -14,7 +14,9 @@ BackendClient::BackendClient(const std::string &api_base_url,
       setup_token_(setup_token) {}
 
 Expected<HeartbeatResponse>
-BackendClient::send_heartbeat(const vigo::telemetry::TelemetryData &telemetry) {
+BackendClient::send_heartbeat(const vigo::telemetry::TelemetryData &telemetry,
+                              std::string_view firmware_version,
+                              std::string_view ota_status, std::string_view ota_error) {
   cJSON *root = cJSON_CreateObject();
   if (!root)
     return std::unexpected(DeviceError::InternalError);
@@ -22,7 +24,16 @@ BackendClient::send_heartbeat(const vigo::telemetry::TelemetryData &telemetry) {
   std::unique_ptr<cJSON, decltype(&cJSON_Delete)> root_ptr(root, cJSON_Delete);
 
   cJSON_AddStringToObject(root, "hardware_id", hardware_id_.c_str());
-  cJSON_AddStringToObject(root, "firmware_version", "1.0.0"); // Hardcoded
+  cJSON_AddStringToObject(root, "firmware_version",
+                          std::string(firmware_version).c_str());
+
+  // OTA status reporting
+  cJSON_AddStringToObject(root, "ota_status", std::string(ota_status).c_str());
+  if (!ota_error.empty()) {
+    cJSON_AddStringToObject(root, "ota_error", std::string(ota_error).c_str());
+  } else {
+    cJSON_AddNullToObject(root, "ota_error");
+  }
 
   cJSON *tele_obj = cJSON_AddObjectToObject(root, "telemetry");
   cJSON_AddNumberToObject(tele_obj, "free_heap", telemetry.free_heap);
@@ -57,6 +68,16 @@ BackendClient::send_heartbeat(const vigo::telemetry::TelemetryData &telemetry) {
   cJSON *ack = cJSON_GetObjectItem(resp_json, "ack");
   if (ack && cJSON_IsBool(ack)) {
     out.ack = cJSON_IsTrue(ack);
+  }
+
+  cJSON *update_available = cJSON_GetObjectItem(resp_json, "update_available");
+  if (update_available && cJSON_IsBool(update_available)) {
+    out.update_available = cJSON_IsTrue(update_available);
+  }
+
+  cJSON *update_version = cJSON_GetObjectItem(resp_json, "update_version");
+  if (update_version && cJSON_IsString(update_version)) {
+    out.update_version = update_version->valuestring;
   }
 
   cJSON *stream_token = cJSON_GetObjectItem(resp_json, "stream_token");

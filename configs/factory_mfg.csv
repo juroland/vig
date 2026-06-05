@@ -1,0 +1,6 @@
+key,type,encoding,value
+factory,namespace,,
+hardware_id,data,string,VIGO-DEV-001
+device_token,data,string,setup_token_value_placeholder
+dtls_cert,file,string,configs/dtls_cert_placeholder.pem
+dtls_key,file,binary,configs/dtls_key_placeholder.der

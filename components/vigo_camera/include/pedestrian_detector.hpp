@@ -14,16 +14,14 @@ namespace vigo::detection {
 // Internal helpers exposed for unit testing
 namespace detail {
 
-// Convert ESP32 proprietary OUYY_EVYY (Espressif YUV420) to YUV422
-// interleaved (YUYV) format, applying 2x2 software binning (downscaling).
-// Output dimensions: (original_width/2, original_height/2)
-void convert_ouyy_evyy_to_yuyv_binned(const uint8_t *src, uint8_t *dst,
-                                      int original_width, int original_height);
+// Convert ESP32 proprietary OUYY_EVYY (Espressif YUV420) to standard YUV420
+// format, applying 2x2 software binning (downscaling).
+void convert_ouyy_evyy_to_yuv420_binned(const uint8_t *src, uint8_t *dst,
+                                        int original_width, int original_height);
 
-// Downsample YUYV interleaved frame by 2x in both dimensions.
-// Averages 2x2 pixel blocks, producing (src_width/2, src_height/2) output.
-void downsample_yuyv_2x(const uint8_t *src, uint8_t *dst, int src_width,
-                        int src_height);
+// Downsample YUV420 frame by 2x in both dimensions.
+void downsample_yuv420_2x(const uint8_t *src, uint8_t *dst, int src_width,
+                          int src_height);
 
 } // namespace detail
 
@@ -33,6 +31,7 @@ struct DebugFrame {
   int height{0};
   float probability{0.0f};
   bool has_frame{false};
+  bool is_uyvy{false};
 };
 
 class PedestrianDetector {
@@ -61,9 +60,10 @@ public:
   float get_max_aspect_ratio() const { return max_aspect_ratio_; }
 
   static void update_debug_frame(const uint8_t *yuyv, int width, int height,
-                                 float probability);
+                                 float probability, bool is_uyvy = false);
   static bool get_debug_frame(std::vector<uint8_t> &yuyv_out, int &width_out,
-                              int &height_out, float &probability_out);
+                              int &height_out, float &probability_out,
+                              bool *is_uyvy_out = nullptr);
 
   // Simulation & Mocking Controls
   static void set_simulated_pedestrian_present(bool present) {
@@ -104,6 +104,9 @@ private:
   static inline bool sim_pedestrian_present_{false};
   static inline float sim_score_{0.85f};
   static inline std::vector<float> sim_box_{0.25f, 0.20f, 0.65f, 0.85f};
+
+  void *ppa_client_{nullptr}; // ppa_client_handle_t
+  void *ppa_sem_{nullptr};    // SemaphoreHandle_t
 };
 
 } // namespace vigo::detection

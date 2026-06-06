@@ -132,144 +132,62 @@ TEST_CASE("3. Motion and pedestrian detected (successful dispatch)", "[pipeline]
   TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.85f, det.box[3]);
 }
 
-TEST_CASE("4. convert_ouyy_evyy_to_yuyv_binned unit test", "[pipeline]") {
-  ESP_LOGI(TAG, "Running Test 4: convert_ouyy_evyy_to_yuyv_binned unit test");
+TEST_CASE("4. convert_ouyy_evyy_to_yuv420_binned unit test", "[pipeline]") {
+  ESP_LOGI(TAG, "Running Test 4: convert_ouyy_evyy_to_yuv420_binned unit test");
 
-  // Input resolution: 4x2
-  // Output resolution: 2x1
-  uint8_t src[12] = {
-    // Row 0 (6 bytes: stride = 4 * 1.5 = 6)
-    // [u0, y00, unused, u1, y02, unused]
-    10, 100, 0, 20, 110, 0,
-    // Row 1 (6 bytes)
-    // [v0, unused, unused, v1, unused, unused]
-    30, 0,   0, 40, 0,   0
-  };
-  uint8_t dst[4] = {0}; // 2x1 YUYV is 4 bytes
-
-  vigo::detection::detail::convert_ouyy_evyy_to_yuyv_binned(src, dst, 4, 2);
-
-  // Expected averages:
-  // u = (u0 + u1) / 2 = (10 + 20) / 2 = 15
-  // v = (v0 + v1) / 2 = (30 + 40) / 2 = 35
-  // y00 = 100
-  // y02 = 110
-  // dst is standard YUYV: [y00, v, y02, u] (swapped per implementation logic)
-  TEST_ASSERT_EQUAL_UINT8(100, dst[0]); // Y00
-  TEST_ASSERT_EQUAL_UINT8(35, dst[1]);  // V (which is U in standard YUYV)
-  TEST_ASSERT_EQUAL_UINT8(110, dst[2]); // Y02
-  TEST_ASSERT_EQUAL_UINT8(15, dst[3]);  // U (which is V in standard YUYV)
-}
-
-TEST_CASE("5. downsample_yuyv_2x unit test", "[pipeline]") {
-  ESP_LOGI(TAG, "Running Test 5: downsample_yuyv_2x unit test");
-
-  // Input YUYV 4x2: 16 bytes
-  uint8_t src[16] = {
-    // Row 0: [Y0 U Y1 V], [Y2 U Y3 V]
-    80, 10, 90, 20, 100, 30, 110, 40,
-    // Row 1: [Y0 U Y1 V], [Y2 U Y3 V]
-    84, 12, 94, 22, 104, 32, 114, 42
-  };
-  uint8_t dst[4] = {0}; // 2x1 YUYV: 4 bytes
-
-  vigo::detection::detail::downsample_yuyv_2x(src, dst, 4, 2);
-
-  // Expected:
-  // y0 = (80 + 90 + 84 + 94) / 4 = 348 / 4 = 87
-  // y1 = (100 + 110 + 104 + 114) / 4 = 428 / 4 = 107
-  // u = (10 + 30 + 12 + 32) / 4 = 84 / 4 = 21
-  // v = (20 + 40 + 22 + 42) / 4 = 124 / 4 = 31
-  // dst is: [y0, u, y1, v]
-  TEST_ASSERT_EQUAL_UINT8(87, dst[0]);
-  TEST_ASSERT_EQUAL_UINT8(21, dst[1]);
-  TEST_ASSERT_EQUAL_UINT8(107, dst[2]);
-  TEST_ASSERT_EQUAL_UINT8(31, dst[3]);
-}
-
-TEST_CASE("7. downsample_yuyv_2x larger unit test (8x4 -> 4x2)", "[pipeline]") {
-  ESP_LOGI(TAG, "Running Test 7: downsample_yuyv_2x larger unit test (8x4 -> 4x2)");
-
-  // Input YUYV 8x4: 64 bytes
-  uint8_t src[64];
-  for (int y = 0; y < 4; ++y) {
-    uint8_t *row = src + y * 16;
-    for (int x = 0; x < 4; ++x) {
-      // Each macro-pixel (2 pixels): [Y0, U, Y1, V]
-      row[x * 4 + 0] = y * 10 + x * 2;       // Y0
-      row[x * 4 + 1] = y * 10 + 50 + x;      // U
-      row[x * 4 + 2] = y * 10 + x * 2 + 1;   // Y1
-      row[x * 4 + 3] = y * 10 + 80 + x;      // V
+  // Input resolution: 4x4 -> 24 bytes
+  uint8_t src[24] = {0};
+  for (int y = 0; y < 4; y++) {
+    for (int x = 0; x < 4; x++) {
+      int idx = (y * 4 + x) * 1.5;
+      src[idx + 1] = y * 10 + x; // Y value
+      if (x % 2 == 0) src[idx] = y * 20 + x; // U or V
     }
   }
+  
+  // Output resolution: 2x2 -> 6 bytes
+  uint8_t dst[6] = {0};
 
-  uint8_t dst[16] = {0}; // 4x2 YUYV is 16 bytes
-  vigo::detection::detail::downsample_yuyv_2x(src, dst, 8, 4);
+  vigo::detection::detail::convert_ouyy_evyy_to_yuv420_binned(src, dst, 4, 4);
 
-  // Let's manually calculate expected outputs:
-  // dst_width = 4, dst_height = 2
-  // For dst y = 0 (averages src rows 0 and 1):
-  // - Output macro-pixel 0 (dst x = 0):
-  //   y0 = (src_row0[Y0] + src_row0[Y1] + src_row1[Y0] + src_row1[Y1]) / 4
-  //      = (0 + 1 + 10 + 11) / 4 = 22 / 4 = 5
-  //   y1 = (src_row0[Y2] + src_row0[Y3] + src_row1[Y2] + src_row1[Y3]) / 4
-  //      = (2 + 3 + 12 + 13) / 4 = 30 / 4 = 7
-  //   u  = (src_row0[U0] + src_row0[U1] + src_row1[U0] + src_row1[U1]) / 4
-  //      = (50 + 51 + 60 + 61) / 4 = 222 / 4 = 55
-  //   v  = (src_row0[V0] + src_row0[V1] + src_row1[V0] + src_row1[V1]) / 4
-  //      = (80 + 81 + 90 + 91) / 4 = 342 / 4 = 85
-  //   So dst[0..3] = [5, 55, 7, 85]
-  TEST_ASSERT_EQUAL_UINT8(5, dst[0]);
-  TEST_ASSERT_EQUAL_UINT8(55, dst[1]);
-  TEST_ASSERT_EQUAL_UINT8(7, dst[2]);
-  TEST_ASSERT_EQUAL_UINT8(85, dst[3]);
-
-  // - Output macro-pixel 1 (dst x = 2):
-  //   y0 = (src_row0[Y4] + src_row0[Y5] + src_row1[Y4] + src_row1[Y5]) / 4
-  //      = (4 + 5 + 14 + 15) / 4 = 38 / 4 = 9
-  //   y1 = (src_row0[Y6] + src_row0[Y7] + src_row1[Y6] + src_row1[Y7]) / 4
-  //      = (6 + 7 + 16 + 17) / 4 = 46 / 4 = 11
-  //   u  = (src_row0[U2] + src_row0[U3] + src_row1[U2] + src_row1[U3]) / 4
-  //      = (52 + 53 + 62 + 63) / 4 = 230 / 4 = 57
-  //   v  = (src_row0[V2] + src_row0[V3] + src_row1[V2] + src_row1[V3]) / 4
-  //      = (82 + 83 + 92 + 93) / 4 = 350 / 4 = 87
-  //   So dst[4..7] = [9, 57, 11, 87]
-  TEST_ASSERT_EQUAL_UINT8(9, dst[4]);
-  TEST_ASSERT_EQUAL_UINT8(57, dst[5]);
-  TEST_ASSERT_EQUAL_UINT8(11, dst[6]);
-  TEST_ASSERT_EQUAL_UINT8(87, dst[7]);
-
-  // For dst y = 1 (averages src rows 2 and 3):
-  // - Output macro-pixel 0 (dst x = 0):
-  //   y0 = (src_row2[Y0] + src_row2[Y1] + src_row3[Y0] + src_row3[Y1]) / 4
-  //      = (20 + 21 + 30 + 31) / 4 = 102 / 4 = 25
-  //   y1 = (src_row2[Y2] + src_row2[Y3] + src_row3[Y2] + src_row3[Y3]) / 4
-  //      = (22 + 23 + 32 + 33) / 4 = 110 / 4 = 27
-  //   u  = (src_row2[U0] + src_row2[U1] + src_row3[U0] + src_row3[U1]) / 4
-  //      = (70 + 71 + 80 + 81) / 4 = 302 / 4 = 75
-  //   v  = (src_row2[V0] + src_row2[V1] + src_row3[V0] + src_row3[V1]) / 4
-  //      = (100 + 101 + 110 + 111) / 4 = 422 / 4 = 105
-  //   So dst[8..11] = [25, 75, 27, 105]
-  TEST_ASSERT_EQUAL_UINT8(25, dst[8]);
-  TEST_ASSERT_EQUAL_UINT8(75, dst[9]);
-  TEST_ASSERT_EQUAL_UINT8(27, dst[10]);
-  TEST_ASSERT_EQUAL_UINT8(105, dst[11]);
-
-  // - Output macro-pixel 1 (dst x = 2):
-  //   y0 = (src_row2[Y4] + src_row2[Y5] + src_row3[Y4] + src_row3[Y5]) / 4
-  //      = (24 + 25 + 34 + 35) / 4 = 118 / 4 = 29
-  //   y1 = (src_row2[Y6] + src_row2[Y7] + src_row3[Y6] + src_row3[Y7]) / 4
-  //      = (26 + 27 + 36 + 37) / 4 = 126 / 4 = 31
-  //   u  = (src_row2[U2] + src_row2[U3] + src_row3[U2] + src_row3[U3]) / 4
-  //      = (72 + 73 + 82 + 83) / 4 = 310 / 4 = 77
-  //   v  = (src_row2[V2] + src_row2[V3] + src_row3[V2] + src_row3[V3]) / 4
-  //      = (102 + 103 + 112 + 113) / 4 = 430 / 4 = 107
-  //   So dst[12..15] = [29, 77, 31, 107]
-  TEST_ASSERT_EQUAL_UINT8(29, dst[12]);
-  TEST_ASSERT_EQUAL_UINT8(77, dst[13]);
-  TEST_ASSERT_EQUAL_UINT8(31, dst[14]);
-  TEST_ASSERT_EQUAL_UINT8(107, dst[15]);
+  // Y-plane
+  TEST_ASSERT_EQUAL_UINT8(1, dst[0]); 
+  TEST_ASSERT_EQUAL_UINT8(3, dst[1]);
+  TEST_ASSERT_EQUAL_UINT8(21, dst[2]);
+  TEST_ASSERT_EQUAL_UINT8(23, dst[3]);
+  
+  // U/V-planes
+  TEST_ASSERT_EQUAL_UINT8(0, dst[4]); 
+  TEST_ASSERT_EQUAL_UINT8(20, dst[5]);
 }
+
+TEST_CASE("5. downsample_yuv420_2x unit test", "[pipeline]") {
+  ESP_LOGI(TAG, "Running Test 5: downsample_yuv420_2x unit test");
+
+  // Input YUV420 4x4: 16 Y, 4 U, 4 V = 24 bytes
+  uint8_t src[24] = {
+    80, 90, 100, 110,
+    84, 94, 104, 114,
+    180, 190, 200, 210,
+    184, 194, 204, 214, // Y plane
+    10, 30, 12, 32,     // U plane
+    20, 40, 22, 42      // V plane
+  };
+  uint8_t dst[6] = {0}; // 2x2 YUV420: 6 bytes
+
+  vigo::detection::detail::downsample_yuv420_2x(src, dst, 4, 4);
+
+  // Y0 = (80+90+84+94)/4 = 87
+  TEST_ASSERT_EQUAL_UINT8(87, dst[0]);
+  TEST_ASSERT_EQUAL_UINT8(107, dst[1]);
+  TEST_ASSERT_EQUAL_UINT8(187, dst[2]);
+  TEST_ASSERT_EQUAL_UINT8(207, dst[3]);
+  
+  // U/V
+  TEST_ASSERT_EQUAL_UINT8(21, dst[4]);
+  TEST_ASSERT_EQUAL_UINT8(31, dst[5]);
+}
+
 
 TEST_CASE("6. PedestrianDetector downscale factor instantiation", "[pipeline]") {
   ESP_LOGI(TAG, "Running Test 6: PedestrianDetector downscale factor instantiation");
@@ -312,10 +230,9 @@ TEST_CASE("8. JPEG encoding of downscaled 320x240 frame", "[pipeline]") {
   jpeg_encode_cfg_t enc_cfg = {};
   enc_cfg.width = width;
   enc_cfg.height = height;
-  enc_cfg.src_type = JPEG_ENCODE_IN_FORMAT_YUV422;
-  enc_cfg.sub_sample = JPEG_DOWN_SAMPLING_YUV422;
+  enc_cfg.src_type = JPEG_ENCODE_IN_FORMAT_GRAY;
+  enc_cfg.sub_sample = JPEG_DOWN_SAMPLING_GRAY;
   enc_cfg.image_quality = 80;
-  enc_cfg.pixel_reverse = true;
 
   size_t outbuf_size = width * height;
   jpeg_encode_memory_alloc_cfg_t mem_cfg = {};

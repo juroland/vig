@@ -136,18 +136,18 @@ Expected<void> StreamServer::start(int port, SnapshotCallback snapshot_cb) {
     int width = 0;
     int height = 0;
     float probability = 0.0f;
+    bool is_uyvy = false;
     if (vigo::detection::PedestrianDetector::get_debug_frame(yuyv_data, width, height,
-                                                             probability)) {
+                                                             probability, &is_uyvy)) {
       if (self->jpeg_engine_) {
         jpeg_encode_cfg_t enc_cfg = {};
         enc_cfg.width = width;
         enc_cfg.height = height;
-        enc_cfg.src_type = JPEG_ENCODE_IN_FORMAT_YUV422;
-        enc_cfg.sub_sample = JPEG_DOWN_SAMPLING_YUV422;
+        enc_cfg.src_type = JPEG_ENCODE_IN_FORMAT_GRAY;
+        enc_cfg.sub_sample = JPEG_DOWN_SAMPLING_GRAY;
         enc_cfg.image_quality = 80;
-        enc_cfg.pixel_reverse = true;
 
-        size_t inbuf_size = yuyv_data.size();
+        size_t inbuf_size = width * height;
         jpeg_encode_memory_alloc_cfg_t in_mem_cfg = {};
         in_mem_cfg.buffer_direction = JPEG_ENC_ALLOC_INPUT_BUFFER;
         size_t actual_in_size = 0;
@@ -162,7 +162,16 @@ Expected<void> StreamServer::start(int port, SnapshotCallback snapshot_cb) {
             jpeg_alloc_encoder_mem(outbuf_size, &mem_cfg, &actual_out_size));
 
         if (inbuf && outbuf) {
-          memcpy(inbuf, yuyv_data.data(), inbuf_size);
+          if (is_uyvy) {
+            for (int y = 0; y < height; ++y) {
+              size_t row_start = y * (width * 3 / 2);
+              for (int x = 0; x < width; ++x) {
+                inbuf[y * width + x] = yuyv_data[row_start + (x / 2) * 3 + 1 + (x % 2)];
+              }
+            }
+          } else {
+            memcpy(inbuf, yuyv_data.data(), inbuf_size);
+          }
           uint32_t out_size = 0;
           esp_err_t err =
               jpeg_encoder_process(self->jpeg_engine_, &enc_cfg, inbuf, inbuf_size,

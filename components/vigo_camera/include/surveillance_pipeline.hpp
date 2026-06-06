@@ -1,4 +1,5 @@
-#pragma once
+#ifndef VIGO_SURVEILLANCE_PIPELINE_HPP
+#define VIGO_SURVEILLANCE_PIPELINE_HPP
 
 #include "camera.hpp"
 #include "motion_detector.hpp"
@@ -27,8 +28,11 @@ public:
                        float pedestrian_max_aspect_ratio = 1.00f);
   ~SurveillancePipeline() = default;
 
-  // Process a captured camera frame through the cascading pipeline.
-  SurveillancePipelineResult process(const vigo::camera::CameraFrame &frame);
+  void process(const vigo::camera::CameraFrame &frame);
+
+  using PipelineCallback = std::function<void(const SurveillancePipelineResult &result,
+                                              const vigo::camera::CameraFrame &frame)>;
+  void set_callback(PipelineCallback cb);
 
   void set_pedestrian_threshold(float threshold) {
     pedestrian_detector_.set_threshold(threshold);
@@ -61,6 +65,10 @@ public:
 private:
   vigo::motion::MotionDetector motion_detector_;
   vigo::detection::PedestrianDetector pedestrian_detector_;
+  PipelineCallback pipeline_callback_;
+  bool async_mode_;
 };
 
 } // namespace vigo::pipeline
+
+#endif // VIGO_SURVEILLANCE_PIPELINE_HPP

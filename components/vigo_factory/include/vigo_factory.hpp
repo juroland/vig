@@ -1,5 +1,5 @@
-#ifndef VIG_FACTORY_HPP
-#define VIG_FACTORY_HPP
+#ifndef VIGO_FACTORY_HPP
+#define VIGO_FACTORY_HPP
 
 #include <esp_err.h>
 #include <string>
@@ -48,4 +48,4 @@ esp_err_t get_dtls_cert(std::string &out_cert);
 
 } // namespace vigo::factory
 
-#endif // VIG_FACTORY_HPP
+#endif // VIGO_FACTORY_HPP

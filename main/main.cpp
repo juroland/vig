@@ -244,6 +244,27 @@ public:
     latest_frame_.data.set_external_buffer(telemetry_buffer_.data(),
                                            telemetry_buffer_.size());
 
+    surveillance_pipeline_.set_callback(
+        [this](const pipeline::SurveillancePipelineResult &res,
+               const camera::CameraFrame &frame) {
+          if (res.pedestrian_confirmed) {
+            auto telemetry_data = telemetry_collector_->collect(&frame);
+            if (!telemetry_data.snapshot.empty()) {
+              auto *payload = new MotionEventPayload{std::move(telemetry_data.snapshot),
+                                                     std::move(res.detections)};
+              if (xQueueSend(motion_queue_, &payload, 0) != pdTRUE) {
+                ESP_LOGW(TAG, "Motion upload queue full, dropping event");
+                delete payload;
+              }
+            }
+          } else if (res.motion_detected) {
+            ESP_LOGI(
+                TAG,
+                "Motion detected but no pedestrian confirmed; skipping backend upload");
+          }
+          xSemaphoreGive(detection_idle_sem_);
+        });
+
     // Run system self-test for boot validation and rollback protection
     if (run_system_self_test()) {
       ESP_LOGI(TAG, "Self-test succeeded. Marking app as valid.");
@@ -553,24 +574,7 @@ private:
       if (xSemaphoreTake(detection_start_sem_, portMAX_DELAY) == pdTRUE) {
         esp_task_wdt_reset();
 
-        auto pipeline_res = surveillance_pipeline_.process(detection_frame_);
-        if (pipeline_res.pedestrian_confirmed) {
-          auto telemetry_data = telemetry_collector_->collect(&detection_frame_);
-          if (!telemetry_data.snapshot.empty()) {
-            auto *payload = new MotionEventPayload{std::move(telemetry_data.snapshot),
-                                                   std::move(pipeline_res.detections)};
-            if (xQueueSend(motion_queue_, &payload, 0) != pdTRUE) {
-              ESP_LOGW(TAG, "Motion upload queue full, dropping event");
-              delete payload;
-            }
-          }
-        } else if (pipeline_res.motion_detected) {
-          ESP_LOGI(
-              TAG,
-              "Motion detected but no pedestrian confirmed; skipping backend upload");
-        }
-
-        xSemaphoreGive(detection_idle_sem_);
+        surveillance_pipeline_.process(detection_frame_);
       }
     }
   }

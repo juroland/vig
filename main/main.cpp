@@ -330,6 +330,10 @@ private:
     ESP_LOGI(TAG, "Self-test: Waiting for network connection...");
     int retries = 0;
     while (!net::NetworkManager::instance().is_connected() && retries < 15) {
+      // Explicitly ping the TWDT to confirm the main task is still healthy
+      // This fix OTA failures due to a longer startup delay
+      esp_task_wdt_reset();
+
       vTaskDelay(pdMS_TO_TICKS(1000));
       retries++;
     }
@@ -673,7 +677,8 @@ extern "C" void app_main() {
 
   xTaskCreatePinnedToCore(
       [](void *arg) {
-        ESP_LOGI("Main", "Starting Main App Task...");
+        ESP_LOGI("Main", "Starting Main App Task - VIGO\n\nVersion %s\n\n",
+                 VIGO_VERSION);
         static vigo::Device device;
 
         auto start_res = device.start();

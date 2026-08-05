@@ -174,14 +174,38 @@ public:
 
     ESP_LOGI(TAG, "Initializing Network...");
     Expected<void> net_res;
-    if constexpr (config::USE_WIFI) {
-      ESP_LOGI(TAG, "Using WiFi (SSID: %s)", std::string(config::WIFI_SSID).c_str());
-      net_res = net::NetworkManager::instance().init_wifi(
-          std::string(config::WIFI_SSID), std::string(config::WIFI_PASSWORD));
+    factory::NetworkType network_type;
+
+    err = factory::get_network_type(network_type);
+    if (err != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to load network_type from factory partition: %s (0x%x)",
+               esp_err_to_name(err), err);
+      return std::unexpected(DeviceError::InternalError);
+    }
+
+    std::string wifi_ssid;
+    std::string wifi_password;
+    err = factory::get_wifi_ssid(wifi_ssid);
+    if (err != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to load wifi_ssid from factory partition: %s (0x%x)",
+               esp_err_to_name(err), err);
+      return std::unexpected(DeviceError::InternalError);
+    }
+    err = factory::get_wifi_password(wifi_password);
+    if (err != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to load wifi_password from factory partition: %s (0x%x)",
+               esp_err_to_name(err), err);
+      return std::unexpected(DeviceError::InternalError);
+    }
+
+    if (network_type == factory::NetworkType::WIFI) {
+      ESP_LOGI(TAG, "Using WiFi (SSID: %s)", wifi_ssid.c_str());
+      net_res = net::NetworkManager::instance().init_wifi(wifi_ssid, wifi_password);
     } else {
       ESP_LOGI(TAG, "Using Ethernet");
       net_res = net::NetworkManager::instance().init_ethernet();
     }
+
     if (!net_res) {
       ESP_LOGE(TAG, "Network init failed");
       return net_res;
@@ -330,10 +354,6 @@ private:
     ESP_LOGI(TAG, "Self-test: Waiting for network connection...");
     int retries = 0;
     while (!net::NetworkManager::instance().is_connected() && retries < 15) {
-      // Explicitly ping the TWDT to confirm the main task is still healthy
-      // This fix OTA failures due to a longer startup delay
-      esp_task_wdt_reset();
-
       vTaskDelay(pdMS_TO_TICKS(1000));
       retries++;
     }

@@ -191,7 +191,7 @@ MotionDetector::MotionDetector(int stride, uint8_t threshold, float min_change_r
   ppa_client_config_t config = {};
   config.oper_type = PPA_OPERATION_SRM;
   config.max_pending_trans_num = 1;
-  config.data_burst_length = PPA_DATA_BURST_LENGTH_128;
+  config.data_burst_length = PPA_DATA_BURST_LENGTH_64;
 
   esp_err_t err = ppa_register_client(
       &config, reinterpret_cast<ppa_client_handle_t *>(&ppa_client_));
@@ -286,6 +286,11 @@ void MotionDetector::process_frame_async(const vigo::camera::CameraFrame &frame)
     oper_cfg.mode = PPA_TRANS_MODE_NON_BLOCKING;
     oper_cfg.user_data = this;
 
+    // REFACTOR: function for 64 bytes alignment
+    size_t src_sync_size = (frame.data.size() + 63) & ~63;
+    esp_cache_msync((void *)frame.data.data(), src_sync_size,
+                    ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+
     esp_err_t err = ppa_do_scale_rotate_mirror(
         static_cast<ppa_client_handle_t>(ppa_client_), &oper_cfg);
     if (err == ESP_OK) {
@@ -318,7 +323,9 @@ void MotionDetector::worker_loop() {
     bool used_ppa = ppa_used_for_current_frame_;
 
     if (used_ppa) {
-      esp_cache_msync(current_gray_buf_.data(), current_gray_buf_.size(),
+      // REFACTOR: function for 64 bytes alignment
+      size_t sync_size = (current_gray_buf_.size() + 63) & ~63;
+      esp_cache_msync(current_gray_buf_.data(), sync_size,
                       ESP_CACHE_MSYNC_FLAG_INVALIDATE);
     } else {
       convert_ouyy_evyy_to_gray_binned(async_frame_.data.data(),

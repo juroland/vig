@@ -104,4 +104,29 @@ esp_err_t get_dtls_key(std::vector<uint8_t> &out_key) {
   return ESP_OK;
 }
 
+esp_err_t get_network_type(NetworkType &out_network_type) {
+  std::string network_type_str;
+  esp_err_t err = get_string_param("network_type", network_type_str);
+  if (err != ESP_OK) {
+    return err;
+  }
+  if (network_type_str == "ethernet") {
+    out_network_type = NetworkType::ETHERNET;
+  } else if (network_type_str == "wifi") {
+    out_network_type = NetworkType::WIFI;
+  } else {
+    ESP_LOGE(TAG, "Invalid network_type in fct_nvs: %s", network_type_str.c_str());
+    return ESP_ERR_FACTORY_NOT_INITIALIZED;
+  }
+  return ESP_OK;
+}
+
+esp_err_t get_wifi_ssid(std::string &out_wifi_ssid) {
+  return get_string_param("wifi_ssid", out_wifi_ssid);
+}
+
+esp_err_t get_wifi_password(std::string &out_wifi_password) {
+  return get_string_param("wifi_password", out_wifi_password);
+}
+
 } // namespace vigo::factory

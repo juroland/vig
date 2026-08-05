@@ -44,17 +44,6 @@ constexpr float PEDESTRIAN_CLASSIFICATION_THRESHOLD =
 constexpr int STREAM_PORT = CONFIG_VIGO_STREAM_PORT;
 constexpr int STREAM_MAX_CLIENTS = CONFIG_VIGO_STREAM_MAX_CLIENTS;
 
-// Network interface selection
-#ifdef CONFIG_VIGO_USE_WIFI
-constexpr bool USE_WIFI = true;
-constexpr std::string_view WIFI_SSID = CONFIG_VIGO_WIFI_SSID;
-constexpr std::string_view WIFI_PASSWORD = CONFIG_VIGO_WIFI_PASSWORD;
-#else
-constexpr bool USE_WIFI = false;
-constexpr std::string_view WIFI_SSID = "";
-constexpr std::string_view WIFI_PASSWORD = "";
-#endif
-
 } // namespace vigo::config
 
 #endif // VIGO_MAIN_DEVICE_CONFIG_HPP

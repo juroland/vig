@@ -48,7 +48,7 @@ PedestrianDetector::PedestrianDetector(int frame_width, int frame_height,
   ppa_client_config_t config = {};
   config.oper_type = PPA_OPERATION_SRM;
   config.max_pending_trans_num = 1;
-  config.data_burst_length = PPA_DATA_BURST_LENGTH_128;
+  config.data_burst_length = PPA_DATA_BURST_LENGTH_64;
 
   esp_err_t err = ppa_register_client(
       &config, reinterpret_cast<ppa_client_handle_t *>(&ppa_client_));

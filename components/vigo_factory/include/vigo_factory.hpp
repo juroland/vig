@@ -7,6 +7,8 @@
 
 namespace vigo::factory {
 
+enum class NetworkType : uint8_t { ETHERNET, WIFI };
+
 // Custom error codes for factory retrieval
 constexpr esp_err_t ESP_ERR_FACTORY_NOT_INITIALIZED = 0x501;
 constexpr esp_err_t ESP_ERR_FACTORY_KEY_NOT_FOUND = 0x502;
@@ -45,6 +47,27 @@ esp_err_t get_dtls_key(std::vector<uint8_t> &out_key);
  * @return esp_err_t ESP_OK on success.
  */
 esp_err_t get_dtls_cert(std::string &out_cert);
+
+/**
+ * @brief Retrieve network type from fct_nvs.
+ * @param out_network_type Output NetworkType to store the network type.
+ * @return esp_err_t ESP_OK on success.
+ */
+esp_err_t get_network_type(NetworkType &out_network_type);
+
+/**
+ * @brief Retrieve WiFi SSID from fct_nvs.
+ * @param out_wifi_ssid Output string to store the WiFi SSID.
+ * @return esp_err_t ESP_OK on success.
+ */
+esp_err_t get_wifi_ssid(std::string &out_wifi_ssid);
+
+/**
+ * @brief Retrieve WiFi password from fct_nvs.
+ * @param out_wifi_password Output string to store the WiFi password.
+ * @return esp_err_t ESP_OK on success.
+ */
+esp_err_t get_wifi_password(std::string &out_wifi_password);
 
 } // namespace vigo::factory
 

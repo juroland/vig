@@ -4,3 +4,6 @@ hardware_id,data,string,VIGO-DEV-001
 device_token,data,string,setup_token_value_placeholder
 dtls_cert,file,string,configs/dtls_cert_placeholder.pem
 dtls_key,file,binary,configs/dtls_key_placeholder.der
+network_type,data,string,ethernet
+wifi_ssid,data,string,WIFI_SSID_PLACEHOLDER
+wifi_password,data,string,WIFI_PASSWORD_PLACEHOLDER

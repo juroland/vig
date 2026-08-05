@@ -5,6 +5,5 @@ CONFIG_VIGO_API_URL="http://192.168.1.105:8081"
 # Network interface: uncomment the block below to use WiFi instead of Ethernet.
 # By default (no override) the device uses the wired Ethernet interface.
 #
-# CONFIG_VIGO_USE_WIFI=y
 # CONFIG_VIGO_WIFI_SSID="MyNetwork"
 # CONFIG_VIGO_WIFI_PASSWORD="MyPassword"

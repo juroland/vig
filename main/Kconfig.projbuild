@@ -53,24 +53,15 @@ menu "VIG Device Configuration"
         int "Max simultaneous WebSocket clients"
         default 4
 
-    config VIGO_USE_WIFI
-        bool "Use WiFi instead of Ethernet"
-        default n
-        help
-            When enabled, the device connects via WiFi using the credentials below.
-            When disabled (default), the device uses the wired Ethernet interface.
-
     config VIGO_WIFI_SSID
         string "WiFi SSID"
         default ""
-        depends on VIGO_USE_WIFI
         help
             SSID of the WiFi network to connect to.
 
     config VIGO_WIFI_PASSWORD
         string "WiFi Password"
         default ""
-        depends on VIGO_USE_WIFI
         help
             Password for the WiFi network (WPA2-PSK).
 

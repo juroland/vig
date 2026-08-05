@@ -109,6 +109,9 @@ def main():
     parser.add_argument("--defaults-file", help="Path to device defaults file (e.g. configs/jr.defaults)")
     parser.add_argument("--size", default="0x4000", help="Size of the fct_nvs partition in hex or dec")
     parser.add_argument("--idf-path", help="Path to ESP-IDF installation")
+    parser.add_argument("--network-type", choices=["wifi", "ethernet"], help="Network type (wifi or ethernet)")
+    parser.add_argument("--wifi-ssid", help="WiFi SSID")
+    parser.add_argument("--wifi-password", help="WiFi password")
 
     args = parser.parse_args()
 
@@ -139,6 +142,9 @@ def main():
     device_token = args.device_token
     cert_pem = None
     key_der = None
+    network_type = args.network_type
+    wifi_ssid = args.wifi_ssid
+    wifi_password = args.wifi_password
 
     if args.defaults_file:
         print(f"Loading factory parameters from defaults file: {args.defaults_file}")
@@ -148,6 +154,14 @@ def main():
             hardware_id = config.get("CONFIG_VIGO_HARDWARE_ID")
         if not device_token:
             device_token = config.get("CONFIG_VIGO_DEVICE_TOKEN")
+
+        if not network_type:
+            network_type = config.get("CONFIG_VIGO_NETWORK_TYPE") or "ethernet"
+
+        if not wifi_ssid:
+            wifi_ssid = config.get("CONFIG_VIGO_WIFI_SSID") or ""
+        if not wifi_password:
+            wifi_password = config.get("CONFIG_VIGO_WIFI_PASSWORD") or ""
             
         cert_pem_raw = config.get("CONFIG_VIGO_DTLS_CERT_PEM")
         key_pem_raw = config.get("CONFIG_VIGO_DTLS_KEY_PEM")
@@ -196,7 +210,10 @@ def main():
             f"hardware_id,data,string,{hardware_id}",
             f"device_token,data,string,{device_token}",
             f"dtls_cert,file,string,{cert_file_path}",
-            f"dtls_key,file,binary,{key_file_path}"
+            f"dtls_key,file,binary,{key_file_path}",
+            f"network_type,data,string,{network_type}",
+            f"wifi_ssid,data,string,{wifi_ssid}",
+            f"wifi_password,data,string,{wifi_password}"
         ]
         csv_content = "\n".join(csv_lines) + "\n"
 

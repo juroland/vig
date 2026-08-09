@@ -9,9 +9,11 @@
 #include "nvs_flash.h"
 
 // Internal libs
+#include "audio.hpp"
 #include "camera.hpp"
 #include "device_config.hpp"
 #include "error_types.hpp"
+#include "led.hpp"
 #include "mbedtls/base64.h"
 #include "net.hpp"
 #include "stream_server.hpp"
@@ -86,6 +88,7 @@ public:
     } else {
       camera_ = std::make_unique<camera::HardwareCamera>();
     }
+    audio_ = std::make_unique<audio::AudioCapturer>();
   }
 
   ~Device() {
@@ -323,6 +326,10 @@ public:
         [](void *arg) { static_cast<Device *>(arg)->detection_task(); },
         "detection_task", 16384, this, 4, &detection_task_handle_, 0);
 
+    // Start audio task
+    xTaskCreatePinnedToCore([](void *arg) { static_cast<Device *>(arg)->audio_task(); },
+                            "audio_task", 16384, this, 6, &audio_task_handle_, 1);
+
     while (true) {
       vTaskDelay(pdMS_TO_TICKS(1000));
     }
@@ -400,6 +407,10 @@ private:
   std::string active_stream_token_;
 
   TaskHandle_t telemetry_task_handle_ = nullptr;
+
+  // Audio
+  std::unique_ptr<audio::AudioCapturer> audio_;
+  TaskHandle_t audio_task_handle_ = nullptr;
 
   // Cascading Inference Pipeline
   pipeline::SurveillancePipeline surveillance_pipeline_{
@@ -603,6 +614,11 @@ private:
     }
   }
 
+  void audio_task() {
+    ESP_LOGI(TAG, "Audio task started on core %d", xPortGetCoreID());
+    audio_->capture();
+  }
+
   void camera_task() {
     ESP_LOGI(TAG, "Camera task started on core %d", xPortGetCoreID());
     esp_task_wdt_add(nullptr);
@@ -699,7 +715,10 @@ extern "C" void app_main() {
       [](void *arg) {
         ESP_LOGI("Main", "Starting Main App Task - VIGO\n\nVersion %s\n\n",
                  VIGO_VERSION);
+
         static vigo::Device device;
+        vigo::led::RgbLed led(GPIO_NUM_26, GPIO_NUM_27, GPIO_NUM_32);
+        led.setGreen(true);
 
         auto start_res = device.start();
         if (!start_res) {

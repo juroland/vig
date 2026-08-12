@@ -9,6 +9,7 @@ idf_component_register(
     # extern components
     esp_eth esp_common driver nvs_flash esp_wifi_remote esp_hosted
     # internal components
+    vigo_storage
     vigo_audio
     vigo_led
     vigo_net

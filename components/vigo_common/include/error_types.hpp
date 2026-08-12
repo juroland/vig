@@ -21,7 +21,9 @@ enum class DeviceError {
   StreamServerInitFailed,
   CameraLdoFailed,
   CameraIspFailed,
-  InternalError
+  InternalError,
+  SDCardMountFailed,
+  SDCardPowerControlFailed
 };
 
 template <typename T> using Expected = std::expected<T, DeviceError>;
@@ -56,6 +58,10 @@ constexpr std::string_view to_string(DeviceError err) {
     return "Camera ISP Initialization Failed";
   case DeviceError::InternalError:
     return "Internal Error";
+  case DeviceError::SDCardMountFailed:
+    return "SD-Card Mount Failed";
+  case DeviceError::SDCardPowerControlFailed:
+    return "SD-Card Power Control Failed";
   default:
     return "Unknown Error";
   }

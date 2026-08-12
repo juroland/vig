@@ -1,6 +1,6 @@
-#pragma once
+#ifndef VIGO_BACKEND_HPP
+#define VIGO_BACKEND_HPP
 
-#include "error_types.hpp"
 #include "vigo_telemetry.hpp"
 #include <memory>
 #include <string>
@@ -49,3 +49,5 @@ private:
 };
 
 } // namespace vigo::backend
+
+#endif // VIGO_BACKEND_HPP

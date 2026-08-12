@@ -4,7 +4,6 @@
 
 # VIGO : Video Intelligence Guard Outpost
 
-
 Edge vision and networking firmware targeting the Waveshare ESP32-P4. Built with modern C++23, strict static analysis, and a hardware abstraction layer (HAL) over ESP-IDF.
 
 ## Prerequisites
@@ -38,10 +37,11 @@ For in-depth explanations, protocol flow charts, and cryptographic analyses, con
 ### Provisioning Parameters (Factory Partition)
 
 The isolated read-only `fct_nvs` partition stores the following device-specific parameters:
-*   `hardware_id` (string): The unique hardware identifier.
-*   `device_token` (string): The unique long-lived static bearer token for backend API authentication.
-*   `dtls_cert` (string): Self-signed X.509 certificate in PEM format for DTLS-SRTP.
-*   `dtls_key` (binary): Secure ECDSA private key (secp256r1/prime256v1) in binary DER format.
+
+* `hardware_id` (string): The unique hardware identifier.
+* `device_token` (string): The unique long-lived static bearer token for backend API authentication.
+* `dtls_cert` (string): Self-signed X.509 certificate in PEM format for DTLS-SRTP.
+* `dtls_key` (binary): Secure ECDSA private key (secp256r1/prime256v1) in binary DER format.
 
 ---
 
@@ -50,20 +50,27 @@ The isolated read-only `fct_nvs` partition stores the following device-specific 
 The manufacturing workflow utilizes device defaults configuration files (e.g. `configs/jr.defaults`) to extract parameters and keys. This keeps the compiled app firmware entirely generic.
 
 #### 1. Generate DTLS Key & Certificate
+
 Generates a new secure `secp256r1` private key and self-signed certificate, formatting them and saving them inside the device defaults configuration file:
+
 ```bash
 make generate-keys DEVICE=jr
 ```
 
 #### 2. Generate Factory Blob
+
 Pulls `CONFIG_VIGO_HARDWARE_ID`, `CONFIG_VIGO_DEVICE_TOKEN`, and the DTLS certificate/key from `configs/jr.defaults` to compile the read-only NVS partition binary (`build/factory_mfg.bin`):
+
 ```bash
 make generate-factory-blob DEVICE=jr
 ```
+
 *(Alternatively, you can generate a sandbox factory blob manually using command-line arguments: `make generate-factory-blob HARDWARE_ID=VIGO-DEV-001 DEVICE_TOKEN=my_secure_token`)*
 
 #### 3. Production Flash
+
 Compiles the generic application firmware, generates the factory blob for the specified device defaults config, flashes all system code partitions (bootloader, partition table, active app partition), and writes the factory blob to offset `0x12000` in a single execution step:
+
 ```bash
 make production-flash DEVICE=jr PORT=/dev/ttyUSB0
 ```
@@ -75,7 +82,9 @@ make production-flash DEVICE=jr PORT=/dev/ttyUSB0
 The firmware version is the single source of truth for OTA updates. It lives in `version.txt` and follows [SemVer](https://semver.org/) (`MAJOR.MINOR.PATCH`).
 
 ### Bumping the Version
+
 Use the Makefile targets to increment the version:
+
 ```bash
 # Show current version
 make version
@@ -97,6 +106,7 @@ make bump-release
 ```
 
 ### Building an OTA Release
+
 ```bash
 make ota-export
 # Output: release/vigo-x.y.z.bin
@@ -105,6 +115,7 @@ make ota-export
 ### Automated Validation Lifecycle & Rollback Protection
 
 To prevent bricking during OTA deployments, VIG implements an automated validation lifecycle:
+
 1. **Boot Verification**: On boot, the system invokes `run_system_self_test()`.
 2. **Self-Test Criteria**:
    * **Camera Check**: Captures a test frame to ensure image sensor is operational.
@@ -121,7 +132,7 @@ To prevent bricking during OTA deployments, VIG implements an automated validati
 The device uses a dual-OTA layout mapped to the 32 MB flash with an isolated factory provisioning partition:
 
 | Partition | Type | SubType | Offset | Size | Purpose |
-|-----------|------|---------|--------|------|---------|
+| ----------- | ------ | --------- | -------- | ------ | --------- |
 | `nvs` | data | nvs | `0x9000` | 24 KB | Standard writable NVS storage (dynamic state) |
 | `phy_init` | data | phy | `0xf000` | 4 KB | PHY initialization parameters |
 | `otadata` | data | ota | `0x10000` | 8 KB | Tracks which OTA slot is active |

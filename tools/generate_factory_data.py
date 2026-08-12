@@ -5,6 +5,7 @@ import subprocess
 import argparse
 import tempfile
 
+
 def generate_dtls_credentials(tmpdir):
     """
     Generates a new secp256r1 EC private key in DER format and a self-signed X.509 certificate in PEM format.
@@ -15,32 +16,44 @@ def generate_dtls_credentials(tmpdir):
 
     # Generate EC Private Key (secp256r1 / prime256v1)
     ec_cmd = [
-        "openssl", "ecparam",
-        "-name", "prime256v1",
+        "openssl",
+        "ecparam",
+        "-name",
+        "prime256v1",
         "-genkey",
         "-noout",
-        "-out", key_pem_path
+        "-out",
+        key_pem_path,
     ]
     subprocess.run(ec_cmd, check=True, capture_output=True)
 
     # Convert EC Private Key to DER (binary format)
     der_cmd = [
-        "openssl", "ec",
-        "-in", key_pem_path,
-        "-outform", "DER",
-        "-out", key_der_path
+        "openssl",
+        "ec",
+        "-in",
+        key_pem_path,
+        "-outform",
+        "DER",
+        "-out",
+        key_der_path,
     ]
     subprocess.run(der_cmd, check=True, capture_output=True)
 
     # Generate Self-signed Certificate
     req_cmd = [
-        "openssl", "req",
+        "openssl",
+        "req",
         "-new",
         "-x509",
-        "-key", key_pem_path,
-        "-out", cert_pem_path,
-        "-days", "3650",
-        "-subj", "/CN=VigoDevice"
+        "-key",
+        key_pem_path,
+        "-out",
+        cert_pem_path,
+        "-days",
+        "3650",
+        "-subj",
+        "/CN=VigoDevice",
     ]
     subprocess.run(req_cmd, check=True, capture_output=True)
 
@@ -51,6 +64,7 @@ def generate_dtls_credentials(tmpdir):
         cert_pem = f.read()
 
     return key_der, cert_pem
+
 
 def parse_defaults_file(filepath):
     """
@@ -75,11 +89,13 @@ def parse_defaults_file(filepath):
                 config[key] = val
     return config
 
+
 def unescape_pem(val):
     """
     Replaces literal backslash n sequences with actual newlines.
     """
     return val.replace("\\\\n", "\n").replace("\\n", "\n")
+
 
 def pem_key_to_der(pem_key_str, tmpdir):
     """
@@ -89,27 +105,34 @@ def pem_key_to_der(pem_key_str, tmpdir):
     der_path = os.path.join(tmpdir, "key.der")
     with open(pem_path, "w") as f:
         f.write(pem_key_str)
-    
-    cmd = [
-        "openssl", "ec",
-        "-in", pem_path,
-        "-outform", "DER",
-        "-out", der_path
-    ]
+
+    cmd = ["openssl", "ec", "-in", pem_path, "-outform", "DER", "-out", der_path]
     subprocess.run(cmd, check=True, capture_output=True)
     with open(der_path, "rb") as f:
         return f.read()
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Generate Vigo Factory Provisioning NVS Blob")
+    parser = argparse.ArgumentParser(
+        description="Generate Vigo Factory Provisioning NVS Blob"
+    )
     parser.add_argument("--bin-out", required=True, help="Output binary file path")
     parser.add_argument("--csv-out", help="Optional output CSV file path")
     parser.add_argument("--hardware-id", help="Unique hardware identifier")
     parser.add_argument("--device-token", help="Device token")
-    parser.add_argument("--defaults-file", help="Path to device defaults file (e.g. configs/jr.defaults)")
-    parser.add_argument("--size", default="0x4000", help="Size of the fct_nvs partition in hex or dec")
+    parser.add_argument(
+        "--defaults-file",
+        help="Path to device defaults file (e.g. configs/jr.defaults)",
+    )
+    parser.add_argument(
+        "--size", default="0x4000", help="Size of the fct_nvs partition in hex or dec"
+    )
     parser.add_argument("--idf-path", help="Path to ESP-IDF installation")
-    parser.add_argument("--network-type", choices=["wifi", "ethernet"], help="Network type (wifi or ethernet)")
+    parser.add_argument(
+        "--network-type",
+        choices=["wifi", "ethernet"],
+        help="Network type (wifi or ethernet)",
+    )
     parser.add_argument("--wifi-ssid", help="WiFi SSID")
     parser.add_argument("--wifi-password", help="WiFi password")
 
@@ -129,10 +152,19 @@ def main():
         if os.path.isdir(standard_path):
             idf_path = standard_path
         else:
-            print("Error: IDF_PATH is not set and standard installation not found.", file=sys.stderr)
+            print(
+                "Error: IDF_PATH is not set and standard installation not found.",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
-    gen_script = os.path.join(idf_path, "components", "nvs_flash", "nvs_partition_generator", "nvs_partition_gen.py")
+    gen_script = os.path.join(
+        idf_path,
+        "components",
+        "nvs_flash",
+        "nvs_partition_generator",
+        "nvs_partition_gen.py",
+    )
     if not os.path.isfile(gen_script):
         print(f"Error: nvs_partition_gen.py not found at {gen_script}", file=sys.stderr)
         sys.exit(1)
@@ -149,7 +181,7 @@ def main():
     if args.defaults_file:
         print(f"Loading factory parameters from defaults file: {args.defaults_file}")
         config = parse_defaults_file(args.defaults_file)
-        
+
         if not hardware_id:
             hardware_id = config.get("CONFIG_VIGO_HARDWARE_ID")
         if not device_token:
@@ -162,14 +194,17 @@ def main():
             wifi_ssid = config.get("CONFIG_VIGO_WIFI_SSID") or ""
         if not wifi_password:
             wifi_password = config.get("CONFIG_VIGO_WIFI_PASSWORD") or ""
-            
+
         cert_pem_raw = config.get("CONFIG_VIGO_DTLS_CERT_PEM")
         key_pem_raw = config.get("CONFIG_VIGO_DTLS_KEY_PEM")
-        
+
         if not hardware_id or not device_token:
-            print("Error: CONFIG_VIGO_HARDWARE_ID or CONFIG_VIGO_DEVICE_TOKEN not found in defaults file.", file=sys.stderr)
+            print(
+                "Error: CONFIG_VIGO_HARDWARE_ID or CONFIG_VIGO_DEVICE_TOKEN not found in defaults file.",
+                file=sys.stderr,
+            )
             sys.exit(1)
-            
+
         if cert_pem_raw and key_pem_raw:
             cert_pem = unescape_pem(cert_pem_raw)
             key_pem = unescape_pem(key_pem_raw)
@@ -177,10 +212,16 @@ def main():
                 try:
                     key_der = pem_key_to_der(key_pem, tmpdir)
                 except Exception as e:
-                    print(f"Error converting PEM key from defaults file to DER format: {e}", file=sys.stderr)
+                    print(
+                        f"Error converting PEM key from defaults file to DER format: {e}",
+                        file=sys.stderr,
+                    )
                     sys.exit(1)
         else:
-            print("Warning: CONFIG_VIGO_DTLS_CERT_PEM or CONFIG_VIGO_DTLS_KEY_PEM not found in defaults file.", file=sys.stderr)
+            print(
+                "Warning: CONFIG_VIGO_DTLS_CERT_PEM or CONFIG_VIGO_DTLS_KEY_PEM not found in defaults file.",
+                file=sys.stderr,
+            )
 
     # Fallbacks for command-line arguments and openSSL generation
     if not hardware_id:
@@ -190,7 +231,9 @@ def main():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         if cert_pem is None or key_der is None:
-            print("Generating new DTLS credentials (no valid key/cert found in defaults file)...")
+            print(
+                "Generating new DTLS credentials (no valid key/cert found in defaults file)..."
+            )
             key_der, cert_pem = generate_dtls_credentials(tmpdir)
 
         # Write them to files inside tmpdir so they can be referenced by the CSV generator
@@ -213,7 +256,7 @@ def main():
             f"dtls_key,file,binary,{key_file_path}",
             f"network_type,data,string,{network_type}",
             f"wifi_ssid,data,string,{wifi_ssid}",
-            f"wifi_password,data,string,{wifi_password}"
+            f"wifi_password,data,string,{wifi_password}",
         ]
         csv_content = "\n".join(csv_lines) + "\n"
 
@@ -228,7 +271,7 @@ def main():
                 f"hardware_id,data,string,{hardware_id}",
                 f"device_token,data,string,{device_token}",
                 "dtls_cert,file,string,configs/dtls_cert.pem",
-                "dtls_key,file,binary,configs/dtls_key.der"
+                "dtls_key,file,binary,configs/dtls_key.der",
             ]
             with open(args.csv_out, "w") as f:
                 f.write("\n".join(doc_csv_lines) + "\n")
@@ -236,15 +279,22 @@ def main():
 
         # Run the nvs_partition_gen.py utility
         cmd = [
-            sys.executable, gen_script,
-            "generate", csv_tmp_path, args.bin_out, str(size)
+            sys.executable,
+            gen_script,
+            "generate",
+            csv_tmp_path,
+            args.bin_out,
+            str(size),
         ]
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode != 0:
             print(f"Error generating partition binary: {res.stderr}", file=sys.stderr)
             sys.exit(1)
 
-        print(f"Successfully generated factory partition binary: {args.bin_out} (size: {size} bytes)")
+        print(
+            f"Successfully generated factory partition binary: {args.bin_out} (size: {size} bytes)"
+        )
+
 
 if __name__ == "__main__":
     main()

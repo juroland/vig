@@ -1,6 +1,8 @@
 # Can be overridden via command line: make flash PORT=/dev/ttyUSB1
 PORT ?= /dev/ttyACM0
 
+export IDF_CCACHE_ENABLE := 1
+
 ifeq ($(IDF_PATH),)
     IDF_PATH := $(HOME)/.espressif/v6.0.1/esp-idf
 endif

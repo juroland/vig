@@ -21,10 +21,13 @@
 #include "vigo_backend.hpp"
 #include "vigo_factory.hpp"
 #include "vigo_ota.hpp"
+#include "vigo_storage.hpp"
 #include "vigo_telemetry.hpp"
 #include "vigo_whip.hpp"
 
 #include <atomic>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -212,6 +215,23 @@ public:
     if (!net_res) {
       ESP_LOGE(TAG, "Network init failed");
       return net_res;
+    }
+
+    // Mount SD-Card - due to conflicts with wifi and shared SDIO must be done after
+    // wifi initialization
+    auto sd_res = vigo::storage::SdCard::mount();
+    if (!sd_res) {
+      ESP_LOGE(TAG, "Unable to mount the SD-Card: %s",
+               vigo::to_string(sd_res.error()).data());
+      return std::unexpected(sd_res.error());
+    }
+    storage_ = std::move(sd_res.value());
+
+    namespace fs = std::filesystem;
+    fs::path log_file = "/sdcard/app.log";
+    std::ofstream out(log_file, std::ios::app);
+    if (out.is_open()) {
+      out << "System active and logging.\n";
     }
 
     ESP_LOGI(TAG, "Initializing Camera...");
@@ -407,6 +427,9 @@ private:
   std::string active_stream_token_;
 
   TaskHandle_t telemetry_task_handle_ = nullptr;
+
+  // Storage
+  std::optional<storage::SdCard> storage_;
 
   // Audio
   std::unique_ptr<audio::AudioCapturer> audio_;
@@ -616,7 +639,7 @@ private:
 
   void audio_task() {
     ESP_LOGI(TAG, "Audio task started on core %d", xPortGetCoreID());
-    audio_->capture();
+    audio_->capture("/sdcard");
   }
 
   void camera_task() {

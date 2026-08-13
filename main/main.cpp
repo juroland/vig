@@ -83,6 +83,8 @@ static std::string strip_token_from_url(const std::string &url) {
   return base;
 }
 
+enum class DeviceMode { NORMAL, STORAGE };
+
 class Device {
 public:
   Device() {
@@ -125,10 +127,58 @@ public:
     }
   }
 
-  Expected<void> start() {
+  bool is_storage_mode() {
+    gpio_config_t io_conf{};
+    io_conf.pin_bit_mask = (1ULL << vigo::config::BOOT_BUTTON_GPIO);
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    gpio_config(&io_conf);
+
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    return (gpio_get_level(vigo::config::BOOT_BUTTON_GPIO) == 0);
+  }
+
+  void handle_storage_mode() {
+    ESP_LOGI(TAG, "Button pressed: Entering USB Mass Storage mode...");
+
+    auto res = init_storage();
+    if (!res) {
+      ESP_LOGE(TAG, "SD Init failed, Failed to enter into USB Mass Storage Mode");
+      abort();
+    }
+
+    storage_->enable_tinyUSB();
+
+    ESP_LOGI("BOOT", "USB MSC active. You can now plug the USB into a host PC.");
+
+    // Keep the task alive while handling USB requests in background tasks
+    while (1) {
+      vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+  }
+
+  Expected<void> init_storage() {
+    auto sd_res = vigo::storage::SdCard::init();
+    if (!sd_res) {
+      ESP_LOGE(TAG, "Unable to init the SD-Card: %s",
+               vigo::to_string(sd_res.error()).data());
+      return std::unexpected(sd_res.error());
+    }
+    storage_ = std::move(sd_res.value());
+    return {};
+  }
+
+  Expected<DeviceMode> start() {
     ESP_LOGI(TAG, "Starting device initialization...");
     ESP_LOGI(TAG, "Firmware version: %s",
              std::string(config::FIRMWARE_VERSION).c_str());
+
+    if (is_storage_mode()) {
+      return DeviceMode::STORAGE;
+    }
 
     ESP_LOGI(TAG, "Initializing Factory NVS Partition...");
     esp_err_t err = factory::init_factory_partition();
@@ -214,38 +264,26 @@ public:
 
     if (!net_res) {
       ESP_LOGE(TAG, "Network init failed");
-      return net_res;
+      return std::unexpected(DeviceError::NetworkInitFailed);
     }
 
     // Mount SD-Card - due to conflicts with wifi and shared SDIO must be done after
     // wifi initialization
-    auto sd_res = vigo::storage::SdCard::mount();
-    if (!sd_res) {
-      ESP_LOGE(TAG, "Unable to mount the SD-Card: %s",
-               vigo::to_string(sd_res.error()).data());
-      return std::unexpected(sd_res.error());
-    }
-    storage_ = std::move(sd_res.value());
-
-    namespace fs = std::filesystem;
-    fs::path log_file = "/sdcard/app.log";
-    std::ofstream out(log_file, std::ios::app);
-    if (out.is_open()) {
-      out << "System active and logging.\n";
-    }
+    init_storage();
+    storage_->mount();
 
     ESP_LOGI(TAG, "Initializing Camera...");
     auto cam_res = camera_->init();
     if (!cam_res) {
       ESP_LOGE(TAG, "Camera init failed");
-      return cam_res;
+      return std::unexpected(DeviceError::CameraInitFailed);
     }
 
     auto enc_res = encoder_.init(camera_->getWidth(), camera_->getHeight(),
                                  config::CAMERA_TARGET_FPS,
                                  config::ENCODER_BITRATE_KBPS, config::ENCODER_GOP);
     if (!enc_res)
-      return enc_res;
+      return std::unexpected(enc_res.error());
 
     auto snapshot_cb = [this]() -> std::vector<uint8_t> {
       std::lock_guard<std::mutex> lock(latest_snapshot_mutex_);
@@ -254,7 +292,7 @@ public:
 
     auto stream_res = stream_server_.start(config::STREAM_PORT, snapshot_cb);
     if (!stream_res)
-      return stream_res;
+      return std::unexpected(stream_res.error());
 
     ESP_LOGI(TAG, "Initializing Backend Client...");
     backend_client_ = std::make_unique<backend::BackendClient>(
@@ -322,10 +360,14 @@ public:
     }
 
     ESP_LOGI(TAG, "Device initialized successfully.");
-    return {};
+    return DeviceMode::NORMAL;
   }
 
-  void run() {
+  void run(const DeviceMode mode) {
+    if (mode == DeviceMode::STORAGE) {
+      handle_storage_mode();
+      return;
+    }
     // Start camera task
     xTaskCreatePinnedToCore(
         [](void *arg) { static_cast<Device *>(arg)->camera_task(); }, "camera_task",
@@ -752,7 +794,7 @@ extern "C" void app_main() {
           return;
         }
 
-        device.run();
+        device.run(start_res.value());
       },
       "main_app_task", 24576, nullptr, 5, nullptr, 0);
 }

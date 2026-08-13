@@ -140,3 +140,58 @@ The device uses a dual-OTA layout mapped to the 32 MB flash with an isolated fac
 | `ota_0` | app | ota_0 | `0x20000` | 8 MB | OTA firmware partition slot 0 |
 | `ota_1` | app | ota_1 | - | 8 MB | OTA firmware partition slot 1 |
 | `storage` | data | spiffs | - | 14 MB | Local media storage (SPIFFS) |
+
+---
+
+## Hardware Platform Notes (SD Card, Wi-Fi Co-Processor, USB)
+
+This section documents the non-obvious platform constraints learned the hard way.
+Read this before touching `vigo_storage`, `vigo_net`, or the ESP-Hosted/TinyUSB configs.
+
+### Shared SDMMC host controller (two slots, one peripheral)
+
+The ESP32-P4 has a **single** SDMMC SDIO host peripheral with **two slots**, shared
+between two different subsystems:
+
+* **Slot 0** — the SD card (4-bit, CLK=43, CMD=44, D0..D3=39..42, VDD via on-chip **LDO channel 4**).
+* **Slot 1** — the Wi-Fi co-processor (ESP32-C6 via ESP-Hosted, 4-bit, 40 MHz, CLK=18, CMD=19, D0..D3=14..17, reset = **GPIO 54**).
+
+Consequences:
+
+* Whoever initializes a card on either slot must run the full sequence
+  `malloc(sdmmc_card_t)` → `sdmmc_host_init()` → `sdmmc_host_init_slot(slot, …)` →
+  `sdmmc_card_init(host, card)`. Calling `sdmmc_card_init()` on an unallocated card
+  pointer crashes with `Guru Meditation (Store access fault)` (`memset` into address 0).
+* `sdmmc_host_init()` is a shared singleton — the second caller gets the existing
+  handle (`SDMMC host controller already created`, harmless).
+* The SD card must be **mounted after Wi-Fi is up** in normal mode (see `Device::start()`),
+  and in USB mass storage mode ESP-Hosted must never touch the bus (see below).
+
+### USB Mass Storage mode (boot button at startup)
+
+Holding the boot button (**GPIO 52**) at boot enters storage mode: the SD card is
+exposed over the OTG **High-Speed** port (`TINYUSB_PORT_HIGH_SPEED_0`, dedicated USB
+pads — no GPIO mapping) via TinyUSB MSC.
+
+### ESP-Hosted bring-up: poll *on demand*, not at boot
+
+`esp_hosted` ≥ 3.0 defaults `CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=y`:
+a C-constructor task starts probing the co-processor over SDIO **before `app_main()`**,
+in every mode. That was the source of the `sdmmc_init_ocr: send_op_cond (1) returned
+0x107` / `eh_host_port_sdio: sdmmc_card_init failed` error storms:
+
+* In **storage mode** the probing task fights the SD card/USB-MSC over the shared SDMMC host.
+* In **normal mode** the bring-up is one-shot: `BRINGUP_FAILED` latches, and all later
+  Wi-Fi init returns `-1` for the whole boot.
+
+Fix in use: `CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n`, and
+`NetworkManager::init_wifi()` drives the link on demand
+(`esp_hosted_init()` + `esp_hosted_connect_to_slave()`, both idempotent).
+
+### Co-processor reset polarity (GPIO 54)
+
+`CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_LOW=y` is board truth here: GPIO 54 is wired to
+the C6 `EN` pin, and ESP modules' `EN` lines are **active-low** (LOW = reset, HIGH = run).
+The 2.x → 3.0.6 bump flipped shipped configs to `ACTIVE_HIGH`, which makes the port's
+reset sequence end at *inactive* == LOW on GPIO 54 == **co-processor held in permanent
+reset** → it never answers `send_op_cond` (the exact `0x107` timeouts above).

@@ -1,20 +1,17 @@
+#include <cstdlib>
+
 #include "vigo_storage.hpp"
 
 #include "esp_vfs_fat.h"
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
 #include "sdmmc_cmd.h"
+#include "tinyusb.h"
+#include "tinyusb_default_config.h"
+#include "tinyusb_msc.h"
 
 namespace vigo::storage {
 
-std::expected<SdCard, DeviceError> SdCard::mount(const char *mount_point) {
-  esp_vfs_fat_mount_config_t mount_config = {
-      .format_if_mount_failed = true,
-      .max_files = 5,
-      .allocation_unit_size = 16 * 1024,
-      .disk_status_check_enable = true,
-      .use_one_fat = false,
-  };
-
+std::expected<SdCard, DeviceError> SdCard::init() {
   sdmmc_card_t *card = nullptr;
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
 
@@ -41,16 +38,31 @@ std::expected<SdCard, DeviceError> SdCard::mount(const char *mount_point) {
   slot_config.d3 = PIN_D3;
   slot_config.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
 
-  ret = esp_vfs_fat_sdmmc_mount(mount_point, &host, &slot_config, &mount_config, &card);
+  return SdCard(card, pwr_ctrl_handle, host, slot_config);
+}
+
+std::expected<void, DeviceError> SdCard::mount(const char *mount_point) {
+  mount_point_ = mount_point;
+  esp_vfs_fat_mount_config_t mount_config = {
+      .format_if_mount_failed = true,
+      .max_files = 5,
+      .allocation_unit_size = 16 * 1024,
+      .disk_status_check_enable = true,
+      .use_one_fat = false,
+  };
+
+  auto ret = esp_vfs_fat_sdmmc_mount(mount_point, &host_, &slot_config_, &mount_config,
+                                     &card_);
   if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to mount SD card (%s)", esp_err_to_name(ret));
+    ESP_LOGE(TAG, "Failed to init SD card (%s)", esp_err_to_name(ret));
     return std::unexpected(DeviceError::SDCardMountFailed);
   }
 
   ESP_LOGI(TAG, "SD card mounted successfully at %s", mount_point);
-  sdmmc_card_print_info(stdout, card);
+  sdmmc_card_print_info(stdout, card_);
 
-  return SdCard(mount_point, card, pwr_ctrl_handle);
+  is_mounted_ = true;
+  return {};
 }
 
 void SdCard::unmount() {
@@ -62,14 +74,55 @@ void SdCard::unmount() {
       ESP_LOGE(TAG, "Error unmounting SD card: %s", esp_err_to_name(err));
     }
 
-    if (pwr_ctrl_handle_) {
-      sd_pwr_ctrl_del_on_chip_ldo(pwr_ctrl_handle_);
-      pwr_ctrl_handle_ = nullptr;
-    }
-
     is_mounted_ = false;
-    card_ = nullptr;
-    mount_point_ = nullptr;
   }
 }
+
+SdCard::~SdCard() {
+  unmount();
+  if (pwr_ctrl_handle_) {
+    sd_pwr_ctrl_del_on_chip_ldo(pwr_ctrl_handle_);
+    pwr_ctrl_handle_ = nullptr;
+  }
+  card_ = nullptr;
+  mount_point_ = nullptr;
+}
+
+void SdCard::enable_tinyUSB() {
+  ESP_LOGI(TAG, "Button pressed: Entering USB Mass Storage mode...");
+
+  // The card is only allocated during mount(); in storage mode the filesystem
+  // is never mounted, so initialize the card for raw block access here.
+  if (!card_) {
+    card_ = static_cast<sdmmc_card_t *>(malloc(sizeof(sdmmc_card_t)));
+    if (!card_) {
+      ESP_LOGE(TAG, "Failed to allocate memory for sdmmc_card_t");
+      abort();
+    }
+
+    if (sdmmc_host_init() != ESP_OK ||
+        sdmmc_host_init_slot(host_.slot, &slot_config_) != ESP_OK ||
+        sdmmc_card_init(&host_, card_) != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to initialize SD card for USB Mass Storage mode");
+      abort();
+    }
+  }
+
+  // MSC storage backend for SD card
+  tinyusb_msc_storage_config_t config_sdmmc{};
+  config_sdmmc.medium.card = card_;
+  tinyusb_msc_storage_handle_t storage_hdl;
+  ESP_ERROR_CHECK(tinyusb_msc_new_storage_sdmmc(&config_sdmmc, &storage_hdl));
+
+  // Install TinyUSB driver stack.
+  // TINYUSB_DEFAULT_CONFIG() selects the OTG High-Speed port and performs the
+  // PHY setup, which is required on ESP32-P4: usb_new_phy() enables the OTG2.0
+  // peripheral bus clock. Skipping it leaves the controller clock-gated and
+  // makes the TinyUSB task crash with a load access fault.
+  tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
+  ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
+
+  ESP_LOGI(TAG, "USB Mass Storage is active.");
+}
+
 } // namespace vigo::storage

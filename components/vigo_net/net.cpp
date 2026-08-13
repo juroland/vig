@@ -2,6 +2,7 @@
 #include "driver/gpio.h"
 #include "esp_crt_bundle.h"
 #include "esp_event.h"
+#include "esp_hosted.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
@@ -194,6 +195,24 @@ void NetworkManager::eth_event_handler(void *arg, esp_event_base_t event_base,
 
 Expected<void> NetworkManager::init_wifi(const std::string &ssid,
                                          const std::string &password) {
+  // Bring the Wi-Fi co-processor link up on demand.
+  //
+  // CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN is intentionally disabled:
+  // ESP-Hosted's boot-time probing task fights the SD card over the shared SDMMC
+  // host controller in USB mass storage mode and latches BRINGUP_FAILED before
+  // the app even starts. The link is therefore owned here, only when Wi-Fi is
+  // actually used (never in storage mode), restoring the pre-3.x on-demand
+  // behaviour. Both calls are idempotent.
+  ESP_LOGI(TAG, "Bringing up Wi-Fi co-processor...");
+  if (esp_hosted_init() != 0) {
+    ESP_LOGE(TAG, "esp_hosted_init failed");
+    return std::unexpected(DeviceError::NetworkInitFailed);
+  }
+  if (esp_hosted_connect_to_slave() != 0) {
+    ESP_LOGE(TAG, "Failed to connect to Wi-Fi co-processor");
+    return std::unexpected(DeviceError::NetworkInitFailed);
+  }
+
   ESP_LOGI(TAG, "esp_netif_init...");
   ESP_ERROR_CHECK(esp_netif_init());
 

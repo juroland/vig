@@ -1,6 +1,7 @@
 #ifndef VIGO_MAIN_DEVICE_CONFIG_HPP
 #define VIGO_MAIN_DEVICE_CONFIG_HPP
 
+#include "driver/gpio.h"
 #include "sdkconfig.h"
 #include <string_view>
 
@@ -43,6 +44,9 @@ constexpr float PEDESTRIAN_CLASSIFICATION_THRESHOLD =
 // Streaming
 constexpr int STREAM_PORT = CONFIG_VIGO_STREAM_PORT;
 constexpr int STREAM_MAX_CLIENTS = CONFIG_VIGO_STREAM_MAX_CLIENTS;
+
+// User interface
+constexpr auto BOOT_BUTTON_GPIO = GPIO_NUM_52;
 
 } // namespace vigo::config
 

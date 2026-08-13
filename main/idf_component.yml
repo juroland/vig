@@ -2,14 +2,11 @@ dependencies:
   idf:
     version: '>=4.1.0'
   espressif/cjson: '*'
-  espressif/esp_h264: "^1.0.0"
-  espressif/esp_cam_sensor: "^2.1.0"
-  espressif/esp_jpeg: "^1.0.0"
-  espressif/esp_wifi_remote: "*"
-  espressif/esp_hosted: "*"
-  espressif/esp-dl: "*"
-  espressif/pedestrian_detect: "^0.3.2"
-
-
-
-
+  espressif/esp_h264: ^1.0.0
+  espressif/esp_cam_sensor: ^2.1.0
+  espressif/esp_jpeg: ^1.0.0
+  espressif/esp_wifi_remote: '*'
+  espressif/esp_hosted: '*'
+  espressif/esp-dl: '*'
+  espressif/pedestrian_detect: ^0.3.2
+  espressif/esp_tinyusb: ~2.0.0

@@ -21,11 +21,13 @@ private:
   sdmmc_card_t *card_{nullptr};
   bool is_mounted_{false};
   sd_pwr_ctrl_handle_t pwr_ctrl_handle_{nullptr};
+  sdmmc_host_t host_;
+  sdmmc_slot_config_t slot_config_;
 
-  SdCard(const char *mount_point, sdmmc_card_t *card,
-         sd_pwr_ctrl_handle_t pwr_ctrl_handle)
-      : mount_point_(mount_point), card_(card), is_mounted_(true),
-        pwr_ctrl_handle_(pwr_ctrl_handle) {}
+  SdCard(sdmmc_card_t *card, sd_pwr_ctrl_handle_t pwr_ctrl_handle, sdmmc_host_t host,
+         sdmmc_slot_config_t slot_config)
+      : card_(card), is_mounted_(false), pwr_ctrl_handle_(pwr_ctrl_handle), host_(host),
+        slot_config_(slot_config) {}
 
   static constexpr const char *TAG = "SdCard";
 
@@ -37,7 +39,8 @@ public:
   // Enable move semantics for transferring ownership across scopes
   SdCard(SdCard &&other) noexcept
       : mount_point_(other.mount_point_), card_(other.card_),
-        is_mounted_(other.is_mounted_), pwr_ctrl_handle_(other.pwr_ctrl_handle_) {
+        is_mounted_(other.is_mounted_), pwr_ctrl_handle_(other.pwr_ctrl_handle_),
+        host_(other.host_), slot_config_(other.slot_config_) {
     other.is_mounted_ = false;
     other.card_ = nullptr;
     other.mount_point_ = nullptr;
@@ -51,19 +54,24 @@ public:
       mount_point_ = other.mount_point_;
       card_ = other.card_;
       is_mounted_ = other.is_mounted_;
+      pwr_ctrl_handle_ = other.pwr_ctrl_handle_;
+      host_ = other.host_;
+      slot_config_ = other.slot_config_;
 
       other.is_mounted_ = false;
       other.card_ = nullptr;
       other.mount_point_ = nullptr;
+      other.pwr_ctrl_handle_ = nullptr;
     }
     return *this;
   }
 
-  ~SdCard() { unmount(); }
+  ~SdCard();
 
-  /// Factory method to initialize and mount the SD card
-  [[nodiscard]] static std::expected<SdCard, DeviceError>
-  mount(const char *mount_point = "/sdcard");
+  [[nodiscard]] static std::expected<SdCard, DeviceError> init();
+  std::expected<void, DeviceError> mount(const char *path = "/sdcard");
+
+  void enable_tinyUSB();
 
   void unmount();
 

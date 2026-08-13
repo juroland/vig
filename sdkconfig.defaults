@@ -48,5 +48,21 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=360
 CONFIG_ESP_HOSTED_DFLT_TASK_FROM_SPIRAM=y
 CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y
 
+# Do NOT auto-init ESP-Hosted before app_main(): the boot-time probing task
+# fights the SD card over the shared SDMMC host controller in USB mass storage
+# mode and latches BRINGUP_FAILED before the app even gets to init WiFi.
+# The co-processor link is brought up on demand in init_wifi() instead.
+CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n
+
+# Co-processor reset polarity on GPIO54. ESP modules' EN pin is active-LOW by
+# convention (LOW = reset, HIGH = run); esp_hosted 2.x-era configs on this
+# project drifted to ACTIVE_HIGH which would hold the C6 in permanent reset
+# (CP never answers send_op_cond → sdmmc 0x107 timeouts) if GPIO54 is wired
+# straight to EN. Keep LOW unless the board has an inverting buffer on EN.
+CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_LOW=y
+
+# USB Mass Storage mode on the SD card (boot button at startup)
+CONFIG_TINYUSB_MSC_ENABLED=y
+
 # Lower general allocation threshold from 16 KB to 1 KB to route most heap allocations to PSRAM
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024
